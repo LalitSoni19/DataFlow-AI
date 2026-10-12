@@ -106,6 +106,7 @@ class Settings:
     auth_required: bool = False
     stripe_webhook_secret: str | None = None
     razorpay_webhook_secret: str | None = None
+    google_site_verification: str | None = None
 
     @property
     def is_production(self) -> bool:
@@ -220,6 +221,7 @@ class Settings:
             auth_required=auth_req,
             stripe_webhook_secret=env("STRIPE_WEBHOOK_SECRET") or None,
             razorpay_webhook_secret=env("RAZORPAY_WEBHOOK_SECRET") or None,
+            google_site_verification=env("GOOGLE_SITE_VERIFICATION") or None,
         )
 
     def validate_for_deployment(self) -> list[str]:

@@ -15,9 +15,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
+from dataflow_ai.settings import Settings
+
 def _inject_google_site_verification() -> None:
     """Inject Google Search Console verification meta tag and verification file into Streamlit."""
-    token = "dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8"
+    settings = Settings.from_environment(PROJECT_ROOT)
+    token = settings.google_site_verification or "dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8"
+    if not token:
+        return
+
     verification_tag = f'<meta name="google-site-verification" content="{token}" />'
     try:
         static_dir = Path(st.__file__).parent / "static"
