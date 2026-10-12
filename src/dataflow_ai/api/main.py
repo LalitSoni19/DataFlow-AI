@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from dataflow_ai.ai.assistant import AnalyticsAssistant
 from dataflow_ai.api.routes.ai import router as ai_router
@@ -108,6 +108,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health", tags=["platform"])
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "dataflow-ai-api"}
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    def root() -> str:
+        token = settings.google_site_verification or "dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8"
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-site-verification" content="{token}" />
+    <title>DataFlow AI</title>
+</head>
+<body>
+    <h1>DataFlow AI Platform</h1>
+    <p>API & Analytics Warehouse is running.</p>
+</body>
+</html>"""
 
     app.include_router(analytics_router)
     app.include_router(ai_router)
