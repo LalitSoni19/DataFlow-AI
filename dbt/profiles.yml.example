@@ -1,0 +1,9 @@
+dataflow_ai_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../data/warehouse/dataflow.duckdb
+      schema: analytics_dbt
+      threads: 4
+

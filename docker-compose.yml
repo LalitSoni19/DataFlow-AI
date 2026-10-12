@@ -1,0 +1,30 @@
+services:
+  api:
+    build:
+      context: .
+    image: dataflow-ai:latest
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Supply the remaining secrets and trusted origins through the host
+      # environment, Docker secrets, or your deployment platform. Never bake
+      # them into this file or the image.
+      DATAFLOW_ENV: ${DATAFLOW_ENV:-production}
+      DATAFLOW_JWT_SECRET: ${DATAFLOW_JWT_SECRET:?Set a secure DATAFLOW_JWT_SECRET before deployment}
+      DATAFLOW_CORS_ORIGINS: ${DATAFLOW_CORS_ORIGINS:?Set explicit HTTPS dashboard origins}
+      DATAFLOW_DATABASE_URL: ${DATAFLOW_DATABASE_URL:-}
+      MOTHERDUCK_TOKEN: ${MOTHERDUCK_TOKEN:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    volumes:
+      # Required when using the local DuckDB/raw-lake mode. For MotherDuck,
+      # retain this mount too because raw receipts, profiles, and quarantine
+      # artifacts are still operational audit records.
+      - dataflow-data:/app/data
+      - dataflow-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  dataflow-data:
+  dataflow-logs:
