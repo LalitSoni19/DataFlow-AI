@@ -50,6 +50,9 @@ _inject_google_site_verification()
 
 st.set_page_config(page_title="DataFlow AI", page_icon="📊", layout="wide")
 
+# Google Search Console Verification
+st.html('<meta name="google-site-verification" content="dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8" />')
+
 pages = {
     "Platform": [
         st.Page("pages/home.py", title="Dashboard", icon="📊", default=True),
