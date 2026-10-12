@@ -35,6 +35,27 @@ def _read_env_file(env_file: Path) -> dict[str, str]:
     return values
 
 
+def _read_streamlit_secrets() -> dict[str, str]:
+    """Extract flat and nested key-value pairs from st.secrets if available."""
+    values: dict[str, str] = {}
+    try:
+        import streamlit as st  # type: ignore[import-not-found]
+
+        if hasattr(st, "secrets"):
+            for key, val in st.secrets.items():
+                if isinstance(val, (str, int, float, bool)):
+                    values[str(key)] = str(val)
+                elif isinstance(val, dict) or hasattr(val, "items"):
+                    for sub_key, sub_val in val.items():
+                        if isinstance(sub_val, (str, int, float, bool)):
+                            values[str(sub_key)] = str(sub_val)
+                            values[f"{key}_{sub_key}"] = str(sub_val)
+    except Exception:
+        pass
+    return values
+
+
+
 def _positive_float(value: str | None, default: float, *, minimum: float = 0.1, maximum: float = 300.0) -> float:
     try:
         parsed = float(value) if value is not None else default
@@ -123,11 +144,16 @@ class Settings:
         if not env_file.is_file() and project_root is None:
             env_file = Path.cwd() / ".env"
         file_env = _read_env_file(env_file)
+        st_secrets = _read_streamlit_secrets()
 
         def env(key: str, default: str | None = None) -> str | None:
             val = os.getenv(key)
             if val is not None and val != "":
                 return val
+            for candidate in (key, key.upper(), key.lower()):
+                sec_val = st_secrets.get(candidate)
+                if sec_val is not None and sec_val != "":
+                    return sec_val
             file_val = file_env.get(key)
             if file_val is not None and file_val != "":
                 return file_val

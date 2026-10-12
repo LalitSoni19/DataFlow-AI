@@ -97,3 +97,19 @@ def test_motherduck_connection_options_passed(tmp_path: Path) -> None:
         assert call_args[1]["config"].get("motherduck_token") == real_token
         # Verify read_only is NOT passed to duckdb.connect for cloud databases
         assert "read_only" not in call_args[1]
+
+
+def test_motherduck_streamlit_secrets_activates_cloud(tmp_path: Path) -> None:
+    # Simulates deployment on Streamlit Community Cloud without .env
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_stream_secrets_token"
+    mock_secrets = {
+        "MOTHERDUCK_TOKEN": real_token,
+        "DATAFLOW_DATABASE_URL": "md:dataflow_ai",
+    }
+    with patch("streamlit.secrets", mock_secrets):
+        settings = Settings.from_environment(tmp_path)
+        assert settings.motherduck_token == real_token
+        assert settings.database_url == "md:dataflow_ai"
+        assert settings.is_cloud_database is True
+        assert settings.effective_database_dsn == "md:dataflow_ai"
+
