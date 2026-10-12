@@ -15,6 +15,33 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 
+def _inject_google_site_verification() -> None:
+    """Inject Google Search Console verification meta tag and verification file into Streamlit."""
+    token = "dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8"
+    verification_tag = f'<meta name="google-site-verification" content="{token}" />'
+    try:
+        static_dir = Path(st.__file__).parent / "static"
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+            content = index_file.read_text(encoding="utf-8")
+            if verification_tag not in content and "<head>" in content:
+                updated = content.replace("<head>", f"<head>\n    {verification_tag}")
+                index_file.write_text(updated, encoding="utf-8")
+
+        verify_file = static_dir / f"google{token}.html"
+        if not verify_file.exists():
+            verify_file.write_text(f"google-site-verification: google{token}.html\n", encoding="utf-8")
+    except Exception:
+        pass
+
+    try:
+        st.html(f"<head>{verification_tag}</head>")
+    except Exception:
+        pass
+
+
+_inject_google_site_verification()
+
 st.set_page_config(page_title="DataFlow AI", page_icon="📊", layout="wide")
 
 pages = {
