@@ -207,13 +207,6 @@ docker compose --env-file .env up --build
 
 Use a real `DATAFLOW_JWT_SECRET`, explicit HTTPS `DATAFLOW_CORS_ORIGINS`, and persistent volumes or object storage for raw/processed/quarantine artifacts. MotherDuck moves warehouse storage/compute to the cloud, but application audit artifacts still require durable storage.
 
-### Security & Secret Rotation Policy
-
-> [!WARNING]
-> **Rotate Exposed Credentials Immediately:** If any API keys, database URLs, webhook secrets, or service tokens were ever previously committed or hardcoded in version control or test files, they must be considered compromised. Rotate and revoke any previously hardcoded or exposed secrets immediately prior to production launch.
-
-Production deployments must inject credentials via environment variables or cloud secret managers. Never commit `.env` files containing real secrets to version control.
-
 ---
 
 ## Project Structure
