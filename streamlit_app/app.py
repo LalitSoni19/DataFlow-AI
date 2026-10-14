@@ -6,12 +6,15 @@ import sys
 from pathlib import Path
 
 # Ensure project root and src/ are in sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-src_dir = PROJECT_ROOT / "src"
-if str(src_dir) not in sys.path:
-    sys.path.insert(0, str(src_dir))
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+_current = Path(__file__).resolve().parent
+for _parent in [_current, *_current.parents]:
+    _src = _parent / "src"
+    if _src.is_dir() and (_src / "dataflow_ai").is_dir():
+        if str(_src) not in sys.path:
+            sys.path.insert(0, str(_src))
+        if str(_parent) not in sys.path:
+            sys.path.insert(0, str(_parent))
+        break
 
 import streamlit as st
 

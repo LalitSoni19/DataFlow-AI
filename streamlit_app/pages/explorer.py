@@ -5,10 +5,16 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root is in sys.path
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
+_current = Path(__file__).resolve().parent
+for _parent in [_current, *_current.parents]:
+    _src = _parent / "src"
+    if _src.is_dir() and (_src / "dataflow_ai").is_dir():
+        if str(_src) not in sys.path:
+            sys.path.insert(0, str(_src))
+        if str(_parent) not in sys.path:
+            sys.path.insert(0, str(_parent))
+        break
 
 import csv
 import io
