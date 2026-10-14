@@ -30,10 +30,24 @@ client-secret*.json
 id_rsa*
 id_ed25519*
 
-# --- dbt Profiles & Database Credentials ---
+# --- dbt Profiles, Target & Packages ---
 dbt/profiles.yml
 profiles.yml
 !dbt/profiles.yml.example
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+target/
+dbt_packages/
+
+# --- Airflow Runtime Artifacts ---
+airflow.cfg
+airflow.db
+airflow/*.db
+airflow/logs/
+airflow-webserver.pid
+standalone_admin_password.txt
+webserver_config.py
 
 # --- Virtual Environments ---
 .venv/
@@ -91,11 +105,25 @@ data/sample/*.json
 *.parquet
 *.xlsx
 *.xls
+*.dump
+*.sql.dump
+*.bak
+*.backup
+*.wal
+*.tar
+*.tar.gz
+*.zip
+*.7z
+.motherduck*
+*.motherduck*
 !data/**/.gitkeep
 
-# --- Editor & Operating System Artifacts ---
+# --- Editor, Agents & Operating System Artifacts ---
 .vscode/
 .idea/
+.cursor/
+.gemini/
+.agents/
 *.swp
 *.swo
 *~
