@@ -94,8 +94,9 @@ class Settings:
     llm_base_url: str | None = None
     llm_api_key: str | None = None
     llm_model: str | None = None
+    llm_fallback_models: tuple[str, ...] = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
     llm_timeout_seconds: float = 20.0
-    llm_max_retries: int = 1
+    llm_max_retries: int = 2
     ai_query_timeout_seconds: float = 8.0
     ai_synthesize_insights: bool = False
     ingestion_api_key: str | None = None
@@ -179,7 +180,15 @@ class Settings:
         if llm_api_key and not llm_base_url:
             llm_base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
             if not llm_model:
-                llm_model = "gemini-3.6-flash"
+                llm_model = "gemini-3.5-flash-lite"
+
+        fallback_raw = env("LLM_FALLBACK_MODELS")
+        if fallback_raw:
+            llm_fallback_models = tuple(m.strip() for m in fallback_raw.split(",") if m.strip())
+        elif llm_base_url and "generativelanguage.googleapis.com" in llm_base_url:
+            llm_fallback_models = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
+        else:
+            llm_fallback_models = ()
 
         temp_dir = _resolve_path(root, env("DATAFLOW_TEMP_DIR") or str(data_dir / "temp"))
 
@@ -209,8 +218,9 @@ class Settings:
             llm_base_url=llm_base_url,
             llm_api_key=llm_api_key,
             llm_model=llm_model,
+            llm_fallback_models=llm_fallback_models,
             llm_timeout_seconds=_positive_float(env("LLM_TIMEOUT_SECONDS"), 20.0),
-            llm_max_retries=_bounded_int(env("LLM_MAX_RETRIES"), 1),
+            llm_max_retries=_bounded_int(env("LLM_MAX_RETRIES"), 2),
             ai_query_timeout_seconds=_positive_float(env("AI_QUERY_TIMEOUT_SECONDS"), 8.0, maximum=60.0),
             ai_synthesize_insights=(env("AI_SYNTHESIZE_INSIGHTS") or "false").lower() in ("true", "1"),
             ingestion_api_key=env("INGESTION_API_KEY") or None,

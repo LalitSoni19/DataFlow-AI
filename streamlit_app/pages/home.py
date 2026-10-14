@@ -28,7 +28,6 @@ except ModuleNotFoundError:
     )
 
 page_heading("Business dashboard", "Trusted metrics from the completed-order warehouse model")
-st.html('<meta name="google-site-verification" content="dWYj8KkmQ7p1HlC9H7LkaGTdsdBXBPm9-pNd5UZKaJ8" />')
 if ensure_demo_data():
     repository = get_repository()
     try:

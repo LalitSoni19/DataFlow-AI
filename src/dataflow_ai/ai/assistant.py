@@ -286,6 +286,7 @@ class AnalyticsAssistant:
                 self.settings.llm_api_key,
                 timeout_seconds=self.settings.llm_timeout_seconds,
                 max_retries=self.settings.llm_max_retries,
+                fallback_models=self.settings.llm_fallback_models,
             )
         if self.settings.ollama_base_url and self.settings.ollama_model:
             return OllamaClient(
@@ -600,16 +601,37 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     """Parse a small model response without accepting prose as executable SQL."""
 
     candidate = raw.strip()
-    if candidate.startswith("```") and candidate.endswith("```"):
-        candidate = candidate.split("\n", 1)[1] if "\n" in candidate else ""
-        candidate = candidate.rsplit("```", 1)[0].strip()
+    # 1. Direct JSON parse
     try:
         payload = json.loads(candidate)
-    except json.JSONDecodeError as error:
-        raise LLMError("The AI returned malformed structured output.") from error
-    if not isinstance(payload, dict):
-        raise LLMError("The AI response must be a JSON object.")
-    return payload
+        if isinstance(payload, dict):
+            return payload
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # 2. Extract from markdown code fence ```json ... ``` or ``` ... ```
+    fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.DOTALL)
+    if fence_match:
+        try:
+            payload = json.loads(fence_match.group(1).strip())
+            if isinstance(payload, dict):
+                return payload
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # 3. Locate outermost curly braces { ... }
+    first_brace = candidate.find("{")
+    last_brace = candidate.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        snippet = candidate[first_brace : last_brace + 1].strip()
+        try:
+            payload = json.loads(snippet)
+            if isinstance(payload, dict):
+                return payload
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    raise LLMError("The AI returned malformed structured output.")
 
 
 def _parse_model_decision(raw: str) -> ModelDecision:

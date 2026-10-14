@@ -48,3 +48,58 @@ def test_bad_model_sql_gets_one_safe_repair_attempt(tmp_path: Path) -> None:
     assert "analytics.fact_sales" in response.sql
     assert response.warning is not None
     assert mock_llm.complete.call_count == 2
+
+
+def test_parse_json_object_handles_markdown_and_prose() -> None:
+    from dataflow_ai.ai.assistant import _parse_json_object
+
+    # Direct JSON
+    assert _parse_json_object('{"intent": "warehouse_query", "sql": "SELECT 1"}') == {
+        "intent": "warehouse_query",
+        "sql": "SELECT 1",
+    }
+
+    # Markdown block
+    assert _parse_json_object(
+        '```json\n{"intent": "clarify", "answer": "Which month?"}\n```'
+    ) == {"intent": "clarify", "answer": "Which month?"}
+
+    # Markdown with surrounding text
+    raw_with_prose = (
+        "Here is the parsed routing decision:\n"
+        "```json\n"
+        '{"intent": "sales_guidance", "answer": "Focus on pipeline velocity."}\n'
+        "```\n"
+        "Let me know if you need more details."
+    )
+    assert _parse_json_object(raw_with_prose) == {
+        "intent": "sales_guidance",
+        "answer": "Focus on pipeline velocity.",
+    }
+
+
+def test_llm_client_fallback_chain_on_transient_failure() -> None:
+    from urllib.error import HTTPError
+    from dataflow_ai.ai.llm_client import LLMClient
+
+    client = LLMClient(
+        base_url="https://api.example.com",
+        model="primary-model",
+        fallback_models=("fallback-model-1", "fallback-model-2"),
+    )
+
+    call_records: list[str] = []
+
+    def mock_post(url, payload, api_key, *, timeout=20.0, max_retries=2):
+        model = payload["model"]
+        call_records.append(model)
+        if model == "primary-model":
+            raise HTTPError(url, 503, "Service Unavailable", {}, None)
+        return {"choices": [{"message": {"content": '{"intent": "test"}'}}]}
+
+    with patch("dataflow_ai.ai.llm_client._post_json", side_effect=mock_post):
+        result = client.complete("system prompt", "user prompt")
+
+    assert result == '{"intent": "test"}'
+    assert call_records == ["primary-model", "fallback-model-1"]
+
