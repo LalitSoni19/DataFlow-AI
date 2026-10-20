@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 # Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
@@ -27,6 +28,8 @@ from dataflow_ai.warehouse.repository import WarehouseRepository
 
 LOGGER = logging.getLogger(__name__)
 
+_QUERY_CACHE_TTL: int = 120  # seconds
+
 
 @st.cache_resource
 def get_settings() -> Settings:
@@ -36,6 +39,38 @@ def get_settings() -> Settings:
 @st.cache_resource
 def get_repository() -> WarehouseRepository:
     return WarehouseRepository(get_settings())
+
+
+@st.cache_resource
+def get_assistant():  # noqa: ANN201
+    from dataflow_ai.ai.assistant import AnalyticsAssistant
+
+    return AnalyticsAssistant(get_settings(), get_repository())
+
+
+@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
+def cached_kpi_overview() -> dict[str, Any]:
+    return get_repository().kpi_overview()
+
+
+@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
+def cached_sales(start: str | None = None, end: str | None = None, region: str | None = None) -> list[dict[str, Any]]:
+    return get_repository().sales(start, end, region)
+
+
+@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
+def cached_top_products(limit: int = 10) -> list[dict[str, Any]]:
+    return get_repository().top_products(limit)
+
+
+@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
+def cached_monthly_trend(months: int = 6) -> list[dict[str, Any]]:
+    return get_repository().monthly_trend(months)
+
+
+@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
+def cached_sales_by_category() -> list[dict[str, Any]]:
+    return get_repository().sales_by_category()
 
 
 def _warehouse_ready() -> bool:
@@ -132,5 +167,4 @@ def currency(value: float | None, symbol: str | None = None) -> str:
 def page_heading(title: str, subtitle: str) -> None:
     st.title(title)
     st.caption(subtitle)
-
 

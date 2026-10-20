@@ -225,6 +225,14 @@ class WarehouseRepository:
                     ],
                 )
                 self._set_active_sales_dataset(connection, mode="flexible", run_id=run_id)
+
+                for idx_sql in (
+                    "CREATE INDEX IF NOT EXISTS idx_flex_sales_date     ON analytics.flex_sales (sales_date)",
+                    "CREATE INDEX IF NOT EXISTS idx_flex_sales_category ON analytics.flex_sales (category)",
+                    "CREATE INDEX IF NOT EXISTS idx_flex_sales_region   ON analytics.flex_sales (region)",
+                ):
+                    connection.execute(idx_sql)
+
                 connection.execute("COMMIT")
             except Exception:
                 connection.execute("ROLLBACK")
@@ -406,6 +414,14 @@ class WarehouseRepository:
             GROUP BY 1, 2
             """
         )
+
+        for idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_date     ON analytics.fact_sales (date_key)",
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_region   ON analytics.fact_sales (region)",
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_customer ON analytics.fact_sales (customer_id)",
+            "CREATE INDEX IF NOT EXISTS idx_fact_sales_product  ON analytics.fact_sales (product_id)",
+        ):
+            connection.execute(idx_sql)
 
     @staticmethod
     def _record_quality_results(

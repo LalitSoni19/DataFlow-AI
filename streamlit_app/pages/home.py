@@ -22,6 +22,11 @@ import streamlit as st
 
 try:
     from streamlit_app.components import (
+        cached_kpi_overview,
+        cached_monthly_trend,
+        cached_sales,
+        cached_sales_by_category,
+        cached_top_products,
         currency,
         ensure_demo_data,
         get_repository,
@@ -29,6 +34,11 @@ try:
     )
 except ModuleNotFoundError:
     from components import (  # type: ignore[no-redef]
+        cached_kpi_overview,
+        cached_monthly_trend,
+        cached_sales,
+        cached_sales_by_category,
+        cached_top_products,
         currency,
         ensure_demo_data,
         get_repository,
@@ -37,13 +47,12 @@ except ModuleNotFoundError:
 
 page_heading("Business dashboard", "Trusted metrics from the completed-order warehouse model")
 if ensure_demo_data():
-    repository = get_repository()
     try:
-        overview = repository.kpi_overview()
-        sales = repository.sales()
-        top_products = repository.top_products(5)
-        monthly_trend = repository.monthly_trend(6)
-        category_sales = repository.sales_by_category()
+        overview = cached_kpi_overview()
+        sales = cached_sales()
+        top_products = cached_top_products(5)
+        monthly_trend = cached_monthly_trend(6)
+        category_sales = cached_sales_by_category()
     except Exception as error:  # noqa: BLE001
         st.error(f"Warehouse query failed: {error}")
         st.stop()
@@ -70,7 +79,7 @@ if ensure_demo_data():
         if prev_ord:
             order_delta = f"{((cur_ord - prev_ord) / prev_ord * 100):+.1f}%"
 
-    curr_sym = repository.active_currency_symbol()
+    curr_sym = get_repository().active_currency_symbol()
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Total Sales", currency(overview.get("total_sales_amount") or overview.get("total_revenue")), delta=revenue_delta)
     m2.metric("Total Customers", f"{int(overview.get('active_customers') or 0):,}", delta=customer_delta)

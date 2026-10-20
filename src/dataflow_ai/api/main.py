@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from dataflow_ai.ai.assistant import AnalyticsAssistant
 from dataflow_ai.api.routes.ai import router as ai_router
 from dataflow_ai.api.routes.analytics import router as analytics_router
 from dataflow_ai.api.routes.auth import router as auth_router
@@ -17,9 +16,37 @@ from dataflow_ai.api.routes.payments import router as payments_router
 from dataflow_ai.api.routes.privacy import router as privacy_router
 from dataflow_ai.settings import Settings
 from dataflow_ai.utils import sanitize_secret_string
-from dataflow_ai.warehouse.repository import WarehouseRepository
 
 LOGGER = logging.getLogger("dataflow_ai.api")
+
+
+class _LazyState:
+    """Defers warehouse/assistant construction until first request."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._repository = None
+        self._assistant = None
+
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
+    @property
+    def repository(self):  # noqa: ANN201
+        if self._repository is None:
+            from dataflow_ai.warehouse.repository import WarehouseRepository
+
+            self._repository = WarehouseRepository(self._settings)
+        return self._repository
+
+    @property
+    def assistant(self):  # noqa: ANN201
+        if self._assistant is None:
+            from dataflow_ai.ai.assistant import AnalyticsAssistant
+
+            self._assistant = AnalyticsAssistant(self._settings, self.repository)
+        return self._assistant
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -33,7 +60,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Production deployment validation failed:\n- " + "\n- ".join(validation_errors)
             )
 
-    repository = WarehouseRepository(settings)
     app = FastAPI(
         title="DataFlow AI API",
         version="0.1.0",
@@ -101,9 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers=headers,
         )
 
-    app.state.settings = settings
-    app.state.repository = repository
-    app.state.assistant = AnalyticsAssistant(settings, repository)
+    app.state = _LazyState(settings)  # type: ignore[assignment]
 
     @app.get("/health", tags=["platform"])
     def health() -> dict[str, str]:
@@ -133,5 +157,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 app = create_app()
-
-

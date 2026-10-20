@@ -20,19 +20,17 @@ for _parent in [_current, *_current.parents]:
 
 import streamlit as st
 
-from dataflow_ai.ai.assistant import AnalyticsAssistant
-
 try:
     from streamlit_app.components import (
         ensure_demo_data,
-        get_repository,
+        get_assistant,
         get_settings,
         page_heading,
     )
 except ModuleNotFoundError:
     from components import (  # type: ignore[no-redef]
         ensure_demo_data,
-        get_repository,
+        get_assistant,
         get_settings,
         page_heading,
     )
@@ -79,7 +77,7 @@ if ensure_demo_data():
             st.warning("Please enter a question.")
         else:
             with st.spinner("Analyzing your question..."):
-                response = AnalyticsAssistant(get_settings(), get_repository()).ask(question)
+                response = get_assistant().ask(question)
 
             st.subheader("Answer")
             st.write(response.answer)
