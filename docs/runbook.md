@@ -20,7 +20,7 @@ The raw lake is append-only. Correct the source snapshot, rerun the pipeline, an
 
 ## Cloud operation
 
-- Set `MOTHERDUCK_TOKEN` and `DATAFLOW_DATABASE_URL=md:<database>` only through server-side secrets.
+- Set `MOTHERDUCK_TOKEN` and `DATAFLOW_DATABASE_URL=md:<database>` only through server-side secrets. Use the name of an existing writable MotherDuck database, such as `md:dataflow_ai`. A share URL or copied ATTACH command cannot be used as the writable warehouse.
 - MotherDuck loads run in an explicit transaction, so readers see the prior model or the completed new model rather than an intermediate delete/rebuild state.
 - Keep `data/raw`, `data/processed`, `data/quarantine`, and `logs` on a persistent volume or object-storage-backed mount. MotherDuck hosts the warehouse but does not persist these application artifacts for you.
 - Use one Airflow run at a time for a shared warehouse. Set `DATAFLOW_SOURCE_DIR` to the persisted directory that receives scheduled source snapshots.

@@ -46,8 +46,8 @@ class WarehouseRepository:
     @contextmanager
     def connection(self, *, read_only: bool = False) -> Generator[duckdb.DuckDBPyConnection]:
         is_cloud = self.settings.is_cloud_database
-        if (self.settings.database_url or "").startswith("md:") and not is_cloud:
-            raise ValueError("Cloud warehouse configured without a valid MotherDuck token.")
+        if error := self.settings.warehouse_configuration_error():
+            raise ValueError(error)
         if is_cloud:
             self._ensure_motherduck_env()
         if not read_only:

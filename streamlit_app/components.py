@@ -41,6 +41,9 @@ def base_settings() -> Settings:
 
 def get_settings() -> Settings:
     base = base_settings()
+    if error := base.warehouse_configuration_error():
+        st.error(error)
+        st.stop()
     if base.is_production or base.auth_required:
         if not base.oidc_issuer:
             st.error("Configure the workspace identity provider before signing in.")
@@ -117,7 +120,7 @@ def _warehouse_ready() -> bool:
 
 
 def _display_database_name(settings: Settings) -> str:
-    raw = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+    raw = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:").partition("?")[0]
     if raw.startswith("_share/"):
         parts = raw.split("/")
         if len(parts) >= 2:
@@ -127,9 +130,10 @@ def _display_database_name(settings: Settings) -> str:
 
 def ensure_demo_data() -> bool:
     """Build the sample warehouse only after an explicit user click."""
+    ready = _warehouse_ready()
     _show_connection_badge()
 
-    if _warehouse_ready():
+    if ready:
         repo = get_repository()
         if repo.active_sales_mode() == "flexible":
             codes = [row["currency_code"] for row in repo.currency_coverage()]

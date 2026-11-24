@@ -17,6 +17,7 @@ for _parent in [_current, *_current.parents]:
             sys.path.insert(0, str(_parent))
         break
 
+import duckdb
 import streamlit as st
 
 st.set_page_config(page_title="DataFlow AI", page_icon="📊", layout="wide")
@@ -43,7 +44,21 @@ if base_settings().auth_required or base_settings().is_production:
     if st.sidebar.button("Sign out"):
         st.logout()
 elif get_settings().is_cloud_database:
-    st.sidebar.caption("Connected to MotherDuck Cloud")
+    st.sidebar.caption("MotherDuck cloud warehouse")
 else:
     st.sidebar.caption("Private demo session · temporary storage")
-selected_page.run()
+try:
+    selected_page.run()
+except duckdb.Error as error:
+    if not get_settings().is_cloud_database:
+        raise
+    diagnostic = str(error).lower()
+    if any(term in diagnostic for term in ("unauthorized", "authentication", "invalid token", "expired token")):
+        hint = "Verify MOTHERDUCK_TOKEN in Streamlit Secrets."
+    elif any(term in diagnostic for term in ("permission denied", "read-only", "read only")):
+        hint = "Check that the MotherDuck token can write to the configured database."
+    elif "extension" in diagnostic:
+        hint = "Check the DuckDB/MotherDuck extension compatibility and availability in the cloud runtime."
+    else:
+        hint = "Check that DATAFLOW_DATABASE_URL names an existing writable database and the token has access."
+    st.error(f"MotherDuck warehouse unavailable ({type(error).__name__}). {hint}")

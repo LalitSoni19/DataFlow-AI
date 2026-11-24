@@ -201,8 +201,8 @@ class Settings:
 
     def cloud_scope(self, scoped: Settings, key: str) -> Settings:
         if self.database_url and self.database_url.startswith("md:"):
-            if not self.is_cloud_database:
-                raise ValueError("A valid MOTHERDUCK_TOKEN is required for the configured cloud warehouse.")
+            if error := self.warehouse_configuration_error():
+                raise ValueError(error)
             name = "df_" + sha256(f"{self.database_url}\0{key}".encode()).hexdigest()[:32]
             return replace(scoped, database_url=self.database_url, motherduck_token=self.motherduck_token,
                            cloud_workspace=name)
@@ -248,6 +248,26 @@ class Settings:
             and self.motherduck_token
             and len(self.motherduck_token.strip()) >= 10
         )
+
+    def warehouse_configuration_error(self) -> str | None:
+        url = self.database_url or ""
+        if not url.startswith("md:"):
+            return None
+        target = url.removeprefix("md:").partition("?")[0]
+        if target.lower().startswith("_share/"):
+            return (
+                "DATAFLOW_DATABASE_URL points to a MotherDuck share. "
+                "Set it to your writable database, for example md:dataflow_ai. "
+                "Imports and warehouse setup require write access."
+            )
+        if not target or "/" in target or any(ch in target for ch in "\r\n;\"'"):
+            return (
+                "Set DATAFLOW_DATABASE_URL to a MotherDuck database name, for example "
+                "md:dataflow_ai. Paste the database name without an ATTACH command."
+            )
+        if not self.is_cloud_database:
+            return "Set MOTHERDUCK_TOKEN in the app secrets for the configured MotherDuck database."
+        return None
 
     @property
     def effective_database_dsn(self) -> str:

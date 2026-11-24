@@ -186,6 +186,11 @@ def test_motherduck_attach_snippet_sanitization(tmp_path: Path) -> None:
         assert settings.database_url == "md:_share/dataflow_ai/45031232-cf98-4c26-862a-5d100286fc1z"
         assert settings.is_cloud_database is True
         assert _display_database_name(settings) == "dataflow_ai (shared)"
+        with patch("duckdb.connect") as connect:
+            with pytest.raises(ValueError, match="points to a MotherDuck share"):
+                WarehouseRepository(settings).initialize()
+            connect.assert_not_called()
+
 
 
 def test_identity_scopes_keep_cloud_backend(tmp_path):
