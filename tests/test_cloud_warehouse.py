@@ -113,3 +113,15 @@ def test_motherduck_streamlit_secrets_activates_cloud(tmp_path: Path) -> None:
         assert settings.is_cloud_database is True
         assert settings.effective_database_dsn == "md:dataflow_ai"
 
+
+
+def test_identity_scopes_keep_cloud_backend(tmp_path):
+    from dataclasses import replace
+    base = replace(Settings.from_environment(tmp_path), database_url="md:warehouse",
+                   motherduck_token="dummy-test-credential")
+    alice = base.workspace("issuer", "alice")
+    bob = base.workspace("issuer", "bob")
+    assert alice.is_cloud_database and alice.effective_database_dsn.startswith("md:df_")
+    assert alice.effective_database_dsn != bob.effective_database_dsn
+    assert alice.effective_database_dsn == base.workspace("issuer", "alice").effective_database_dsn
+    assert alice.motherduck_token == base.motherduck_token

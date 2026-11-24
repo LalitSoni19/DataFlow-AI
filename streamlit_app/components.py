@@ -55,7 +55,8 @@ def get_settings() -> Settings:
     # A public demo session must never publish to another visitor's warehouse.
     if "demo_directory" not in st.session_state:
         st.session_state.demo_directory = TemporaryDirectory(prefix="dataflow-demo-")
-    return base.with_data_root(Path(st.session_state.demo_directory.name))
+    scratch = Path(st.session_state.demo_directory.name)
+    return base.cloud_scope(base.with_data_root(scratch), scratch.name)
 
 
 def get_repository() -> WarehouseRepository:
@@ -124,7 +125,7 @@ def ensure_demo_data() -> bool:
 
     settings = get_settings()
     if settings.is_cloud_database:
-        db_name = (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+        db_name = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
         st.info(f"☁️ Connected to MotherDuck cloud database **{db_name}**, but analytics tables are not built yet.")
         button_label = "Build Cloud Warehouse (MotherDuck)"
     elif settings.has_motherduck_placeholder:
@@ -148,7 +149,7 @@ def _show_connection_badge() -> None:
     settings = get_settings()
     st.sidebar.divider()
     if settings.is_cloud_database:
-        db_name = (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+        db_name = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
         st.sidebar.success(f"☁️ MotherDuck: **{db_name}**", icon="☁️")
         st.sidebar.caption("⚡ Cloud RAM & Cloud Storage Active")
     elif settings.has_motherduck_placeholder:

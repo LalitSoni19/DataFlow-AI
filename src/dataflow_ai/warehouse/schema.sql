@@ -150,3 +150,7 @@ AND currency_code = coalesce(getvariable('report_currency')::VARCHAR,
     (SELECT min(currency_code) FROM analytics.flex_sales_classified));
 
 CREATE TABLE IF NOT EXISTS governance.erased_customers (customer_id VARCHAR PRIMARY KEY);
+
+CREATE TABLE IF NOT EXISTS governance.import_assets (run_id VARCHAR, filename VARCHAR, digest VARCHAR, content BLOB, PRIMARY KEY(run_id, filename));
+
+CREATE TABLE IF NOT EXISTS governance.import_artifacts (run_id VARCHAR, kind VARCHAR, filename VARCHAR, content BLOB, PRIMARY KEY(run_id, kind, filename));

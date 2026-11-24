@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+from dataclasses import replace
+import hashlib
 import json
 import logging
 import tempfile
@@ -34,6 +36,11 @@ class PipelineRunner:
     """Orchestrates ingestion, data validation, and warehouse loading."""
 
     def __init__(self, settings: Settings) -> None:
+        self._scratch = None
+        if settings.is_cloud_database:
+            self._scratch = tempfile.TemporaryDirectory(prefix="dataflow-import-")
+            settings = replace(settings.with_data_root(Path(self._scratch.name)),
+                               database_url=settings.database_url, motherduck_token=settings.motherduck_token)
         self.settings = settings
         self.repository = WarehouseRepository(settings)
         self.lake = RawDataLake(settings.raw_dir)
@@ -45,9 +52,50 @@ class PipelineRunner:
             generate_sample_data(self.settings.sample_dir)
         return self.run_from_sources(self.settings.sample_dir)
 
+    def completed_imports(self) -> list[str]:
+        if self.settings.is_cloud_database:
+            self.repository.initialize()
+            return [row["run_id"] for row in self.repository.fetch_all(
+                "SELECT DISTINCT a.run_id, r.finished_at FROM governance.import_assets a "
+                "JOIN governance.pipeline_runs r USING(run_id) WHERE r.status='completed' ORDER BY r.finished_at DESC"
+            )]
+        manifests = sorted(self.settings.processed_dir.glob("run-*.json"), key=lambda path: path.stat().st_mtime, reverse=True)
+        return [path.stem.removeprefix("run-") for path in manifests]
+
+    def _archive_cloud_sources(self, receipts) -> None:
+        if not self.settings.is_cloud_database:
+            return
+        with self.repository.connection() as conn:
+            conn.execute("BEGIN")
+            for receipt in receipts:
+                path = Path(receipt.storage_path)
+                content = path.read_bytes()
+                if hashlib.sha256(content).hexdigest() != receipt.sha256:
+                    raise ValueError("Source changed before cloud archival.")
+                conn.execute("INSERT INTO governance.import_assets VALUES (?, ?, ?, ?)",
+                             [receipt.run_id, path.name, receipt.sha256, content])
+            run_id = receipts[0].run_id
+            for kind, root in (("processed", self.settings.processed_dir), ("quarantine", self.settings.quarantine_dir)):
+                for artifact in (root / run_id).glob("*"):
+                    if artifact.is_file():
+                        conn.execute("INSERT INTO governance.import_artifacts VALUES (?, ?, ?, ?)",
+                                     [run_id, kind, artifact.name, artifact.read_bytes()])
+            conn.execute("COMMIT")
+
     def restore_run(self, run_id: str) -> PipelineRunSummary:
         """Republish verified immutable receipts as a new run in this workspace."""
         run_id = str(uuid.UUID(run_id))
+        if self.settings.is_cloud_database:
+            self.repository.initialize()
+            with tempfile.TemporaryDirectory() as tmp:
+                with self.repository.connection(read_only=True) as conn:
+                    cursor = conn.execute("SELECT filename, digest, content FROM governance.import_assets WHERE run_id=?", [run_id])
+                    while asset := cursor.fetchone():
+                        name, digest, content = asset
+                        if Path(name).name != name or hashlib.sha256(content).hexdigest() != digest:
+                            raise ValueError("Cloud archive failed integrity verification.")
+                        (Path(tmp) / name).write_bytes(content)
+                return self.run_from_sources(Path(tmp))
         manifest = self.settings.processed_dir / f"run-{run_id}.json"
         summary = json.loads(manifest.read_text(encoding="utf8"))
         if summary.get("status") != "completed" or summary.get("run_id") != run_id:
@@ -103,6 +151,7 @@ class PipelineRunner:
             }
             quality_results = validate_source_records(records_by_dataset)
             self._persist_quality_outputs(run_id, quality_results)
+            self._archive_cloud_sources(receipts)
             self.repository.load_validated_data(quality_results, run_id)
 
             finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -178,8 +227,9 @@ class PipelineRunner:
                         row_count=sales_import.profile.source_row_counts.get(path.name, 0),
                     )
                 )
-            self.repository.load_flexible_sales(sales_import, run_id)
             self._persist_flexible_sales_profile(run_id, sales_import.profile.to_dict())
+            self._archive_cloud_sources(receipts)
+            self.repository.load_flexible_sales(sales_import, run_id)
             finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
             duration = round(time.perf_counter() - started_timer, 3)
             ingested_rows = sales_import.profile.row_count

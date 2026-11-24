@@ -30,6 +30,7 @@ class WarehouseRepository:
         self.currency_code = currency_code
         self.settings = settings
         self._cloud_env_configured = False
+        self._workspace_ready = False
         self._initialized = False
         self._initialization_lock = threading.Lock()
 
@@ -45,6 +46,8 @@ class WarehouseRepository:
     @contextmanager
     def connection(self, *, read_only: bool = False) -> Generator[duckdb.DuckDBPyConnection]:
         is_cloud = self.settings.is_cloud_database
+        if (self.settings.database_url or "").startswith("md:") and not is_cloud:
+            raise ValueError("Cloud warehouse configured without a valid MotherDuck token.")
         if is_cloud:
             self._ensure_motherduck_env()
         if not read_only:
@@ -70,6 +73,11 @@ class WarehouseRepository:
             if is_cloud:
                 if self.settings.motherduck_token:
                     config["motherduck_token"] = self.settings.motherduck_token
+                if self.settings.cloud_workspace and not self._workspace_ready:
+                    name = self.settings.cloud_workspace
+                    with duckdb.connect(self.settings.database_url, config=config) as admin:
+                        admin.execute(f"CREATE DATABASE IF NOT EXISTS {_quote_identifier(name)}")
+                    self._workspace_ready = True
                 connection = duckdb.connect(dsn, config=config)
             else:
                 connection = duckdb.connect(dsn, read_only=read_only, config=config)

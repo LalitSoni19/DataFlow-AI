@@ -110,9 +110,9 @@ with api_tab:
                 st.error(sanitize_secret_string(str(exc)))
 
 with history_tab:
-    manifests = sorted(settings.processed_dir.glob("run-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    manifests = runner.completed_imports()
     if manifests:
-        selected = st.selectbox("Completed import", [p.stem.removeprefix("run-") for p in manifests])
+        selected = st.selectbox("Completed import", manifests)
         if st.button("Restore this import as a new version"):
             try:
                 result = runner.restore_run(selected)

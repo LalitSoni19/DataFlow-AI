@@ -108,6 +108,7 @@ class Settings:
     auth_required: bool = False
     stripe_webhook_secret: str | None = None
     razorpay_webhook_secret: str | None = None
+    cloud_workspace: str | None = None
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
@@ -120,7 +121,17 @@ class Settings:
     def workspace(self, issuer: str, subject: str) -> Settings:
         """Use one physical local warehouse and raw lake per verified identity."""
         key = sha256(f"{issuer}\0{subject}".encode()).hexdigest()[:32]
-        return self.with_data_root(self.data_dir / "workspaces" / key)
+        scoped = self.with_data_root(self.data_dir / "workspaces" / key)
+        return self.cloud_scope(scoped, key)
+
+    def cloud_scope(self, scoped: Settings, key: str) -> Settings:
+        if self.database_url and self.database_url.startswith("md:"):
+            if not self.is_cloud_database:
+                raise ValueError("A valid MOTHERDUCK_TOKEN is required for the configured cloud warehouse.")
+            name = "df_" + sha256(f"{self.database_url}\0{key}".encode()).hexdigest()[:32]
+            return replace(scoped, database_url=self.database_url, motherduck_token=self.motherduck_token,
+                           cloud_workspace=name)
+        return scoped
 
     def with_data_root(self, root: Path) -> Settings:
         # Workspace receipts nest dataset, partition and run ID below this root.
@@ -161,7 +172,7 @@ class Settings:
     def effective_database_dsn(self) -> str:
         """Return the connection string for DuckDB: MotherDuck URI or local file path."""
         if self.is_cloud_database and self.database_url and self.database_url.startswith("md:"):
-            return self.database_url
+            return f"md:{self.cloud_workspace}?attach_mode=single" if self.cloud_workspace else self.database_url
         return str(self.database_path)
 
     @classmethod
