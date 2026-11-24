@@ -2,7 +2,7 @@
 
 > A lightweight, local-first data engineering platform and conversational analytics warehouse.
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://lalitsoni-dataflow.streamlit.app/)
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://dataflow-ai-lalitsoni.streamlit.app/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![DuckDB](https://img.shields.io/badge/duckdb-warehouse-yellow.svg)](https://duckdb.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-backend-009688.svg)](https://fastapi.tiangolo.com/)
