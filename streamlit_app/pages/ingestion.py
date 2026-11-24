@@ -32,7 +32,7 @@ try:
 except ModuleNotFoundError:
     from components import get_repository, get_settings, page_heading  # type: ignore[no-redef]
 
-page_heading("Data ingestion", "Upload any sales export or a curated source batch; every received file is preserved in the raw lake")
+page_heading("Import data", "Upload sales files or connect a JSON API to bring data into your workspace.")
 
 # File upload vs API load tabs
 file_tab, api_tab = st.tabs(["📁 Upload Files", "🌐 Load from API"])

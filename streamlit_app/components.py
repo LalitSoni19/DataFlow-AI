@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import escape
 import logging
 import sys
 from pathlib import Path
@@ -165,6 +166,10 @@ def currency(value: float | None, symbol: str | None = None) -> str:
 
 
 def page_heading(title: str, subtitle: str) -> None:
-    st.title(title)
-    st.caption(subtitle)
+    styles = Path(__file__).with_name("theme.css").read_text(encoding="utf-8")
+    st.html(f"<style>{styles}</style>")
+    st.html(
+        '<header class="df-heading"><span class="df-brand">DataFlow AI</span>'
+        f"<h1>{escape(title)}</h1><p>{escape(subtitle)}</p></header>"
+    )
 

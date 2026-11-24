@@ -35,7 +35,7 @@ except ModuleNotFoundError:
         page_heading,
     )
 
-page_heading("Ask sales", "Ask data-grounded questions about imported sales files or general sales-strategy questions")
+page_heading("Ask your data", "Ask a question about your sales or get guidance on sales strategy.")
 
 if ensure_demo_data():
     # Show AI provider status

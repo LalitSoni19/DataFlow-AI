@@ -25,7 +25,7 @@ try:
 except ModuleNotFoundError:
     from components import ensure_demo_data, get_repository, page_heading  # type: ignore[no-redef]
 
-page_heading("Pipeline and data quality", "Observable run status, accepted/rejected rows, and rule failures")
+page_heading("Pipeline quality", "Review the latest run and see which datasets need attention.")
 if ensure_demo_data():
     repository = get_repository()
     status = repository.pipeline_status()

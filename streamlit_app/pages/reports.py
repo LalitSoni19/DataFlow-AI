@@ -35,7 +35,7 @@ except ModuleNotFoundError:
         page_heading,
     )
 
-page_heading("Reports & Insights", "AI-generated monthly business summaries with downloadable reports")
+page_heading("Monthly reports", "Choose a month to review sales, compare categories and download a report.")
 
 if ensure_demo_data():
     repository = get_repository()

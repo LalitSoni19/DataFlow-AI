@@ -23,18 +23,18 @@ import streamlit as st
 st.set_page_config(page_title="DataFlow AI", page_icon="📊", layout="wide")
 
 pages = {
-    "Platform": [
-        st.Page("pages/home.py", title="Dashboard", icon="📊", default=True),
-        st.Page("pages/ingestion.py", title="Data ingestion", icon="📥"),
-        st.Page("pages/pipeline.py", title="Pipeline and quality", icon="✅"),
-        st.Page("pages/warehouse.py", title="Warehouse explorer", icon="🗄️"),
-        st.Page("pages/explorer.py", title="Data explorer", icon="🔍"),
+    "Workspace": [
+        st.Page("pages/home.py", title="Sales overview", icon=":material/space_dashboard:", default=True),
+        st.Page("pages/ingestion.py", title="Import data", icon=":material/upload_file:"),
+        st.Page("pages/pipeline.py", title="Pipeline quality", icon=":material/monitor_heart:"),
+        st.Page("pages/warehouse.py", title="Browse tables", icon=":material/table_view:"),
+        st.Page("pages/explorer.py", title="SQL explorer", icon=":material/code:"),
     ],
-    "AI analytics": [
-        st.Page("pages/assistant.py", title="Ask your data", icon="✨"),
-        st.Page("pages/reports.py", title="Reports & insights", icon="📈"),
+    "Insights": [
+        st.Page("pages/assistant.py", title="Ask your data", icon=":material/forum:"),
+        st.Page("pages/reports.py", title="Monthly reports", icon=":material/summarize:"),
     ],
 }
 selected_page = st.navigation(pages)
-st.sidebar.caption("Local-first, trusted analytics")
+
 selected_page.run()

@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError:
     from components import ensure_demo_data, get_repository, page_heading  # type: ignore[no-redef]
 
-page_heading("Warehouse explorer", "Curated star-schema tables and exportable trusted aggregates")
+page_heading("Browse tables", "Preview warehouse records and export the rows you need.")
 if ensure_demo_data():
     repository = get_repository()
     metadata = repository.table_metadata()

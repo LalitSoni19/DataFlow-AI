@@ -45,7 +45,7 @@ except ModuleNotFoundError:
         page_heading,
     )
 
-page_heading("Business dashboard", "Trusted metrics from the completed-order warehouse model")
+page_heading("Sales overview", "Track revenue, customers and orders across your sales data.")
 if ensure_demo_data():
     try:
         overview = cached_kpi_overview()
@@ -86,25 +86,26 @@ if ensure_demo_data():
     m3.metric("Total Orders", f"{int(overview.get('total_orders') or 0):,}", delta=order_delta)
     m4.metric("Avg Line Value", currency(overview.get("average_line_value")))
 
-    st.divider()
+    if len(monthly_trend) >= 2:
+        st.caption(f"Totals cover all records. Changes compare {current_m['year_month']} with {previous_m['year_month']}.")
 
     # Monthly trend and category breakdown
     left, right = st.columns([3, 2])
 
-    with left:
-        st.subheader("Sales Trend (Last 6 Months)")
+    with left.container(border=True):
+        st.subheader("Monthly revenue")
         if monthly_trend:
             trend_sorted = sorted(monthly_trend, key=lambda r: r.get("year_month") or "")
-            chart_data = {row["year_month"]: float(row.get("revenue") or 0) for row in trend_sorted if row.get("year_month")}
-            st.line_chart(chart_data, x_label="Month", y_label=f"Revenue ({curr_sym})")
+            chart_data = [{"Month": row["year_month"], "Revenue": float(row.get("revenue") or 0)} for row in trend_sorted if row.get("year_month")]
+            st.line_chart(chart_data, x="Month", y="Revenue", color="#60D9C1", x_label="Month", y_label=f"Revenue ({curr_sym})")
         else:
             st.info("No monthly data available yet.")
 
-    with right:
+    with right.container(border=True):
         st.subheader("Sales by Category")
         if category_sales:
-            cat_data = {row.get("category") or "Unspecified": float(row.get("revenue") or 0) for row in category_sales}
-            st.bar_chart(cat_data, x_label="Category", y_label=f"Revenue ({curr_sym})", horizontal=True)
+            cat_data = [{"Category": row.get("category") or "Unspecified", "Revenue": float(row.get("revenue") or 0)} for row in category_sales]
+            st.bar_chart(cat_data, x="Category", y="Revenue", color="#9CAAFB", x_label="Category", y_label=f"Revenue ({curr_sym})", horizontal=True)
         else:
             st.info("No category data available yet.")
 
@@ -113,14 +114,23 @@ if ensure_demo_data():
     # Daily revenue and top products
     left2, right2 = st.columns([3, 2])
 
-    with left2:
+    with left2.container(border=True):
         st.subheader("Daily revenue")
         daily: dict[str, float] = {}
         for row in sales:
             date_k = row.get("date_key") or "Unknown"
             daily[date_k] = daily.get(date_k, 0.0) + float(row.get("revenue") or 0)
-        st.line_chart(daily, x_label="Date", y_label=f"Revenue ({curr_sym})")
+        points = [{"Date": str(day), "Revenue": amount} for day, amount in daily.items()]
+        if points:
+            st.line_chart(points, x="Date", y="Revenue", color="#60D9C1", x_label="Date", y_label=f"Revenue ({curr_sym})")
 
-    with right2:
+        else:
+            st.info("No daily revenue available yet.")
+
+    with right2.container(border=True):
         st.subheader("Top products")
-        st.dataframe(top_products, use_container_width=True, hide_index=True)
+        st.dataframe(
+            top_products, use_container_width=True, hide_index=True,
+            column_config={"product_name": "Product", "category": "Category",
+                           "revenue": f"Revenue ({curr_sym})", "units_sold": "Units sold"},
+        )

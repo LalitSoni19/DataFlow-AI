@@ -30,7 +30,7 @@ try:
 except ModuleNotFoundError:
     from components import ensure_demo_data, get_repository, page_heading  # type: ignore[no-redef]
 
-page_heading("Data Explorer", "Query the warehouse with safe, read-only SQL against analytics tables")
+page_heading("SQL explorer", "Start with a query template or write a SELECT statement to explore your data.")
 
 if ensure_demo_data():
     repository = get_repository()
