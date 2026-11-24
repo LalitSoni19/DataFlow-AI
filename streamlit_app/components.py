@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from html import escape
 from tempfile import TemporaryDirectory
 import logging
@@ -35,7 +36,7 @@ _QUERY_CACHE_TTL: int = 120  # seconds
 
 @st.cache_resource
 def base_settings() -> Settings:
-    return Settings.from_environment(PROJECT_ROOT)
+    return Settings.from_environment(Path(os.environ.get("DATAFLOW_PROJECT_ROOT", PROJECT_ROOT)))
 
 
 def get_settings() -> Settings:

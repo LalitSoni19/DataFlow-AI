@@ -116,7 +116,7 @@ def test_assistant_warning_sanitizes_secrets(tmp_path: Path) -> None:
 
 
 def test_env_example_contains_no_real_secrets() -> None:
-    env_example = Path(".env.example").read_text(encoding="utf-8")
+    env_example = (Path(__file__).resolve().parents[1] / ".env.example").read_text(encoding="utf-8")
     assert "sk_live_" not in env_example
     assert "pk_live_" not in env_example
     assert "AKIA" not in env_example
@@ -125,6 +125,6 @@ def test_env_example_contains_no_real_secrets() -> None:
 
 
 def test_gitignore_contains_critical_secret_patterns() -> None:
-    gitignore_text = Path(".gitignore").read_text(encoding="utf-8")
+    gitignore_text = (Path(__file__).resolve().parents[1] / ".gitignore").read_text(encoding="utf-8")
     for pattern in [".env", ".env.*", "dbt/profiles.yml", "credentials.json", "token.json"]:
         assert pattern in gitignore_text
