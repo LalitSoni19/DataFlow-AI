@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from html import escape
 from tempfile import TemporaryDirectory
 import logging
@@ -55,13 +56,21 @@ def get_settings() -> Settings:
     if "demo_directory" not in st.session_state:
         st.session_state.demo_directory = TemporaryDirectory(prefix="dataflow-demo-")
     scratch = Path(st.session_state.demo_directory.name)
-    return base.cloud_scope(base.with_data_root(scratch), scratch.name)
+    if base.is_cloud_database:
+        scoped = base.with_data_root(scratch)
+        return replace(
+            scoped,
+            database_url=base.database_url,
+            motherduck_token=base.motherduck_token,
+            cloud_workspace=base.cloud_workspace,
+        )
+    return base.with_data_root(scratch)
 
 
 def get_repository() -> WarehouseRepository:
     settings = get_settings()
     code = st.session_state.get("report_currency")
-    key = (str(settings.database_path), code)
+    key = (settings.effective_database_dsn, code)
     if st.session_state.get("_repo_key") != key:
         st.session_state["_repository"] = WarehouseRepository(settings, code)
         st.session_state["_repo_key"] = key
@@ -107,6 +116,15 @@ def _warehouse_ready() -> bool:
     return bool(repo.fetch_all("SELECT mode FROM governance.active_sales_dataset LIMIT 1"))
 
 
+def _display_database_name(settings: Settings) -> str:
+    raw = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+    if raw.startswith("_share/"):
+        parts = raw.split("/")
+        if len(parts) >= 2:
+            return f"{parts[1]} (shared)"
+    return raw
+
+
 def ensure_demo_data() -> bool:
     """Build the sample warehouse only after an explicit user click."""
     _show_connection_badge()
@@ -124,7 +142,7 @@ def ensure_demo_data() -> bool:
 
     settings = get_settings()
     if settings.is_cloud_database:
-        db_name = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+        db_name = _display_database_name(settings)
         st.info(f"☁️ Connected to MotherDuck cloud database **{db_name}**, but analytics tables are not built yet.")
         button_label = "Build Cloud Warehouse (MotherDuck)"
     elif settings.has_motherduck_placeholder:
@@ -148,7 +166,7 @@ def _show_connection_badge() -> None:
     settings = get_settings()
     st.sidebar.divider()
     if settings.is_cloud_database:
-        db_name = settings.cloud_workspace or (settings.database_url or "md:dataflow_ai").removeprefix("md:")
+        db_name = _display_database_name(settings)
         st.sidebar.success(f"☁️ MotherDuck: **{db_name}**", icon="☁️")
         st.sidebar.caption("⚡ Cloud RAM & Cloud Storage Active")
     elif settings.has_motherduck_placeholder:

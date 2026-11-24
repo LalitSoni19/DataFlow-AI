@@ -36,23 +36,98 @@ def _read_env_file(env_file: Path) -> dict[str, str]:
     return values
 
 
-def _read_streamlit_secrets() -> dict[str, str]:
-    """Extract flat and nested key-value pairs from st.secrets if available."""
+def _read_streamlit_secrets(project_root: Path | None = None) -> dict[str, str]:
+    """Extract flat and nested key-value pairs from st.secrets and local secrets.toml."""
     values: dict[str, str] = {}
+
+    def _record(key_str: str, val_str: str, prefix: str = "") -> None:
+        k = key_str.strip()
+        v = val_str.strip()
+        if not k or not v:
+            return
+        values[k] = v
+        values[k.lower()] = v
+        values[k.upper()] = v
+        if prefix:
+            for sep in ("_", "."):
+                combined = f"{prefix}{sep}{k}"
+                values[combined] = v
+                values[combined.lower()] = v
+                values[combined.upper()] = v
+
+    def _flatten(d: object, prefix: str = "") -> None:
+        if not hasattr(d, "items"):
+            return
+        try:
+            for k, v in d.items():  # type: ignore[union-attr]
+                str_k = str(k).strip()
+                new_prefix = f"{prefix}_{str_k}" if prefix else str_k
+                if isinstance(v, (str, int, float, bool)):
+                    _record(str_k, str(v), prefix)
+                elif hasattr(v, "items") or isinstance(v, dict):
+                    _flatten(v, new_prefix)
+        except Exception:
+            pass
+
+    # 1. Try reading from st.secrets if streamlit runtime is available
     try:
         import streamlit as st  # type: ignore[import-not-found]
 
         if hasattr(st, "secrets"):
-            for key, val in st.secrets.items():
-                if isinstance(val, (str, int, float, bool)):
-                    values[str(key)] = str(val)
-                elif isinstance(val, dict) or hasattr(val, "items"):
-                    for sub_key, sub_val in val.items():
-                        if isinstance(sub_val, (str, int, float, bool)):
-                            values[str(sub_key)] = str(sub_val)
-                            values[f"{key}_{sub_key}"] = str(sub_val)
+            is_mocked = not (
+                getattr(st.secrets.__class__, "__module__", "") == "streamlit.runtime.secrets"
+                and getattr(st.secrets.__class__, "__name__", "") == "Secrets"
+            )
+            is_app_root = (project_root is None) or ((project_root / "src" / "dataflow_ai").is_dir())
+            should_read_st = is_app_root or is_mocked
+
+            if should_read_st:
+                try:
+                    for key, val in st.secrets.items():
+                        if isinstance(val, (str, int, float, bool)):
+                            _record(str(key), str(val))
+                        elif hasattr(val, "items") or isinstance(val, dict):
+                            _flatten(val, str(key))
+                except Exception:
+                    for key in (
+                        "MOTHERDUCK_TOKEN", "motherduck_token", "DATAFLOW_DATABASE_URL",
+                        "dataflow_database_url", "DATABASE_URL", "database_url",
+                        "motherduck", "connections", "LLM_API_KEY", "GEMINI_API_KEY",
+                    ):
+                        try:
+                            val = st.secrets.get(key)
+                            if val is not None:
+                                if isinstance(val, (str, int, float, bool)):
+                                    _record(key, str(val))
+                                elif hasattr(val, "items") or isinstance(val, dict):
+                                    _flatten(val, key)
+                        except Exception:
+                            pass
     except Exception:
         pass
+
+    # 2. Directly inspect .streamlit/secrets.toml from filesystem if present
+    search_dirs: list[Path] = []
+    if project_root is not None:
+        search_dirs.append(project_root)
+    else:
+        search_dirs.extend([Path.cwd(), Path(__file__).resolve().parent.parent.parent])
+
+    try:
+        import tomllib
+
+        for base_dir in search_dirs:
+            candidate = base_dir / ".streamlit" / "secrets.toml"
+            if candidate.is_file():
+                try:
+                    parsed = tomllib.loads(candidate.read_text(encoding="utf-8"))
+                    _flatten(parsed)
+                    break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
     return values
 
 
@@ -142,10 +217,18 @@ class Settings:
                     root = Path("//?/UNC/" + windows_path[2:])
                 else:
                     root = Path("//?/" + windows_path)
-        return replace(self, data_dir=root, raw_dir=root / "raw", processed_dir=root / "processed",
-                       quarantine_dir=root / "quarantine", sample_dir=root / "sample",
-                       warehouse_dir=root / "warehouse", database_path=root / "warehouse" / "dataflow.duckdb",
-                       temp_dir=root / "temp", logs_dir=root / "logs", database_url=None, motherduck_token=None)
+        return replace(
+            self,
+            data_dir=root,
+            raw_dir=root / "raw",
+            processed_dir=root / "processed",
+            quarantine_dir=root / "quarantine",
+            sample_dir=root / "sample",
+            warehouse_dir=root / "warehouse",
+            database_path=root / "warehouse" / "dataflow.duckdb",
+            temp_dir=root / "temp",
+            logs_dir=root / "logs",
+        )
 
     @property
     def has_motherduck_placeholder(self) -> bool:
@@ -180,19 +263,19 @@ class Settings:
         if not env_file.is_file() and project_root is None:
             env_file = Path.cwd() / ".env"
         file_env = _read_env_file(env_file)
-        st_secrets = _read_streamlit_secrets()
+        st_secrets = _read_streamlit_secrets(project_root)
 
         def env(key: str, default: str | None = None) -> str | None:
-            val = os.getenv(key)
-            if val is not None and val != "":
-                return val
+            file_val = file_env.get(key) or file_env.get(key.upper()) or file_env.get(key.lower())
+            if file_val is not None and file_val != "":
+                return file_val
             for candidate in (key, key.upper(), key.lower()):
                 sec_val = st_secrets.get(candidate)
                 if sec_val is not None and sec_val != "":
                     return sec_val
-            file_val = file_env.get(key)
-            if file_val is not None and file_val != "":
-                return file_val
+            val = os.getenv(key)
+            if val is not None and val != "":
+                return val
             return default
 
         data_dir = _resolve_path(root, env("DATAFLOW_DATA_DIR") or "data")
@@ -226,11 +309,58 @@ class Settings:
 
         temp_dir = _resolve_path(root, env("DATAFLOW_TEMP_DIR") or str(data_dir / "temp"))
 
-        motherduck_token = env("MOTHERDUCK_TOKEN") or None
-        database_url_raw = env("DATAFLOW_DATABASE_URL") or None
+        motherduck_token = (
+            env("MOTHERDUCK_TOKEN")
+            or env("motherduck_token")
+            or env("connections_motherduck_token")
+            or env("connections.motherduck.token")
+            or env("connections_duckdb_token")
+            or env("connections.duckdb.token")
+            or env("MD_TOKEN")
+            or env("md_token")
+            or None
+        )
+        if not motherduck_token:
+            for k in ("MOTHERDUCK", "motherduck", "token"):
+                cand = env(k)
+                if cand and len(cand.strip()) >= 10:
+                    motherduck_token = cand.strip()
+                    break
+
+        database_url_raw = (
+            env("DATAFLOW_DATABASE_URL")
+            or env("dataflow_database_url")
+            or env("DATABASE_URL")
+            or env("database_url")
+            or env("connections_duckdb_url")
+            or env("connections.duckdb.url")
+            or env("connections_motherduck_database_url")
+            or env("connections.motherduck.database_url")
+            or env("connections_motherduck_database")
+            or env("connections.motherduck.database")
+            or env("motherduck_database")
+            or env("motherduck_database_url")
+            or None
+        )
+        if not database_url_raw and motherduck_token:
+            for k in ("database", "DATABASE", "url", "URL"):
+                cand = env(k)
+                if cand and cand.strip():
+                    database_url_raw = cand.strip()
+                    break
+
+        if database_url_raw:
+            cleaned = database_url_raw.strip()
+            if cleaned.upper().startswith("ATTACH"):
+                cleaned = cleaned[6:].strip()
+            cleaned = cleaned.strip(";").strip().strip("'\"").strip()
+            if cleaned:
+                database_url_raw = cleaned
 
         if motherduck_token and not database_url_raw:
             database_url_raw = "md:dataflow_ai"
+        elif database_url_raw and motherduck_token and not database_url_raw.startswith("md:") and "://" not in database_url_raw:
+            database_url_raw = f"md:{database_url_raw}"
 
         return cls(
             project_root=root,

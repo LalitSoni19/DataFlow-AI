@@ -42,6 +42,8 @@ get_settings()
 if base_settings().auth_required or base_settings().is_production:
     if st.sidebar.button("Sign out"):
         st.logout()
+elif get_settings().is_cloud_database:
+    st.sidebar.caption("Connected to MotherDuck Cloud")
 else:
     st.sidebar.caption("Private demo session · temporary storage")
 selected_page.run()

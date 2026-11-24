@@ -105,6 +105,88 @@ def test_motherduck_streamlit_secrets_activates_cloud(tmp_path: Path) -> None:
         assert settings.effective_database_dsn == "md:dataflow_ai"
 
 
+def test_motherduck_streamlit_secrets_nested_connections(tmp_path: Path) -> None:
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_nested_conn_token"
+    mock_secrets = {
+        "connections": {
+            "motherduck": {
+                "token": real_token,
+                "database": "dataflow_ai",
+            }
+        }
+    }
+    with patch("streamlit.secrets", mock_secrets):
+        settings = Settings.from_environment(tmp_path)
+        assert settings.motherduck_token == real_token
+        assert settings.database_url == "md:dataflow_ai"
+        assert settings.is_cloud_database is True
+        assert settings.effective_database_dsn == "md:dataflow_ai"
+
+
+def test_motherduck_streamlit_secrets_nested_duckdb(tmp_path: Path) -> None:
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_nested_duckdb_token"
+    mock_secrets = {
+        "connections": {
+            "duckdb": {
+                "token": real_token,
+                "url": "md:custom_analytics_db",
+            }
+        }
+    }
+    with patch("streamlit.secrets", mock_secrets):
+        settings = Settings.from_environment(tmp_path)
+        assert settings.motherduck_token == real_token
+        assert settings.database_url == "md:custom_analytics_db"
+        assert settings.is_cloud_database is True
+        assert settings.effective_database_dsn == "md:custom_analytics_db"
+
+
+def test_motherduck_streamlit_secrets_toml_direct_file(tmp_path: Path) -> None:
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_file_secrets_token"
+    secrets_dir = tmp_path / ".streamlit"
+    secrets_dir.mkdir(parents=True, exist_ok=True)
+    toml_content = f'MOTHERDUCK_TOKEN = "{real_token}"\nDATAFLOW_DATABASE_URL = "md:dataflow_ai"\n'
+    (secrets_dir / "secrets.toml").write_text(toml_content, encoding="utf-8")
+
+    with patch("streamlit.secrets", side_effect=Exception("Secrets not in memory")):
+        settings = Settings.from_environment(tmp_path)
+        assert settings.motherduck_token == real_token
+        assert settings.database_url == "md:dataflow_ai"
+        assert settings.is_cloud_database is True
+        assert settings.effective_database_dsn == "md:dataflow_ai"
+
+
+def test_streamlit_components_get_settings_preserves_cloud(tmp_path: Path) -> None:
+    from streamlit_app.components import get_settings
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_components_cloud_token"
+    mock_secrets = {
+        "MOTHERDUCK_TOKEN": real_token,
+        "DATAFLOW_DATABASE_URL": "md:dataflow_ai",
+    }
+    with patch("streamlit.secrets", mock_secrets):
+        with patch.dict(os.environ, {"DATAFLOW_PROJECT_ROOT": str(tmp_path)}):
+            from streamlit_app.components import base_settings
+            base_settings.clear()
+            active_settings = get_settings()
+            assert active_settings.is_cloud_database is True
+            assert active_settings.database_url == "md:dataflow_ai"
+            assert active_settings.motherduck_token == real_token
+            assert active_settings.effective_database_dsn == "md:dataflow_ai"
+
+
+def test_motherduck_attach_snippet_sanitization(tmp_path: Path) -> None:
+    from streamlit_app.components import _display_database_name
+    real_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.dummy_attach_token"
+    mock_secrets = {
+        "MOTHERDUCK_TOKEN": real_token,
+        "DATAFLOW_DATABASE_URL": "ATTACH 'md:_share/dataflow_ai/45031232-cf98-4c26-862a-5d100286fc1z';",
+    }
+    with patch("streamlit.secrets", mock_secrets):
+        settings = Settings.from_environment(tmp_path)
+        assert settings.database_url == "md:_share/dataflow_ai/45031232-cf98-4c26-862a-5d100286fc1z"
+        assert settings.is_cloud_database is True
+        assert _display_database_name(settings) == "dataflow_ai (shared)"
+
 
 def test_identity_scopes_keep_cloud_backend(tmp_path):
     from dataclasses import replace
