@@ -97,7 +97,7 @@ if ensure_demo_data():
         if monthly_trend:
             trend_sorted = sorted(monthly_trend, key=lambda r: r.get("year_month") or "")
             chart_data = [{"Month": row["year_month"], "Revenue": float(row.get("revenue") or 0)} for row in trend_sorted if row.get("year_month")]
-            st.line_chart(chart_data, x="Month", y="Revenue", color="#60D9C1", x_label="Month", y_label=f"Revenue ({curr_sym})")
+            st.line_chart(chart_data, x="Month", y="Revenue", color="#E8C978", x_label="Month", y_label=f"Revenue ({curr_sym})")
         else:
             st.info("No monthly data available yet.")
 
@@ -105,7 +105,7 @@ if ensure_demo_data():
         st.subheader("Sales by Category")
         if category_sales:
             cat_data = [{"Category": row.get("category") or "Unspecified", "Revenue": float(row.get("revenue") or 0)} for row in category_sales]
-            st.bar_chart(cat_data, x="Category", y="Revenue", color="#9CAAFB", x_label="Category", y_label=f"Revenue ({curr_sym})", horizontal=True)
+            st.bar_chart(cat_data, x="Category", y="Revenue", color="#F2E8CD", x_label="Category", y_label=f"Revenue ({curr_sym})", horizontal=True)
         else:
             st.info("No category data available yet.")
 
@@ -122,7 +122,7 @@ if ensure_demo_data():
             daily[date_k] = daily.get(date_k, 0.0) + float(row.get("revenue") or 0)
         points = [{"Date": str(day), "Revenue": amount} for day, amount in daily.items()]
         if points:
-            st.line_chart(points, x="Date", y="Revenue", color="#60D9C1", x_label="Date", y_label=f"Revenue ({curr_sym})")
+            st.line_chart(points, x="Date", y="Revenue", color="#E8C978", x_label="Date", y_label=f"Revenue ({curr_sym})")
 
         else:
             st.info("No daily revenue available yet.")
