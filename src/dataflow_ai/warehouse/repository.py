@@ -54,20 +54,11 @@ class WarehouseRepository:
             self.settings.ensure_directories()
 
         config: dict[str, Any] = {}
-        # Local DuckDB benefits from a custom temp directory; MotherDuck manages its own.
         if not is_cloud and self.settings.temp_dir:
             self.settings.temp_dir.mkdir(parents=True, exist_ok=True)
             config["temp_directory"] = str(self.settings.temp_dir)
 
         dsn = self.settings.effective_database_dsn
-        # MotherDuck does not support the read_only flag (access is managed server-side).
-        # Do not wrap this call in a ThreadPoolExecutor: a timeout on a Future
-        # does not cancel duckdb.connect(), and the executor context waits for
-        # that worker during cleanup.  That made the previous "12 second"
-        # timeout capable of hanging indefinitely and retried failed auth with
-        # a different configuration.
-        # Local DuckDB cannot mix read-only and writer handles, including across
-        # the API and Streamlit processes. The lock is scoped to one workspace.
         guard = nullcontext() if is_cloud else FileLock(dsn + ".lock", timeout=30)
         with guard:
             if is_cloud:
@@ -91,9 +82,6 @@ class WarehouseRepository:
     def initialize(self) -> None:
         if self._initialized:
             return
-        # A runner uses this repository for start/load/finish.  Running the
-        # full DDL script before each operation adds remote round trips and
-        # makes MotherDuck jobs noticeably slower.
         with self._initialization_lock:
             if self._initialized:
                 return
@@ -149,10 +137,6 @@ class WarehouseRepository:
 
         self.initialize()
         with self.connection() as connection:
-            # MotherDuck shares DuckDB's transactional semantics.  Keeping the
-            # delete, load, marts, and quality records in one transaction means
-            # a reader sees either the old batch or the new batch, never a
-            # partially rebuilt warehouse.
             connection.execute("BEGIN TRANSACTION")
             try:
                 for table in ("website_events", "order_items", "orders", "products", "customers"):
@@ -178,14 +162,7 @@ class WarehouseRepository:
                 raise
 
     def load_flexible_sales(self, sales_import: FlexibleSalesImport, run_id: str) -> None:
-        """Atomically replace the active flexible sales dataset.
-
-        ``analytics.flex_sales`` is stable enough for canonical KPIs.  The
-        source-shaped ``analytics.sales_upload`` table preserves every detected
-        column so the AI can answer questions about fields such as channel,
-        sales representative, or tax that were not part of the original app's
-        five-file contract.
-        """
+        """Atomically replace the active flexible sales dataset."""
 
         self.initialize()
         profile = sales_import.profile
@@ -292,10 +269,6 @@ class WarehouseRepository:
         if not records:
             return
         safe_columns = ", ".join(_quote_identifier(column) for column in columns)
-        # Registering Arrow batches turns thousands of remote parameterized
-        # inserts into a small number of set-based INSERT ... SELECT calls.
-        # It is materially faster for MotherDuck and still works locally.  The
-        # executemany path remains only as a compatibility fallback.
         try:
             import pyarrow as pa
 
@@ -482,12 +455,7 @@ class WarehouseRepository:
         *,
         timeout_seconds: float | None = None,
     ) -> list[dict[str, Any]]:
-        """Run a trusted parameterized query and return JSON-serializable dictionaries.
-
-        DuckDB exposes ``interrupt`` on a live connection.  Using it from a
-        timer gives the AI executor a real query-work bound; its response-row
-        limit alone cannot stop a costly sort or Cartesian product.
-        """
+        """Run a trusted parameterized query and return JSON-serializable dictionaries."""
 
         with self.connection(read_only=True) as connection:
             timer: threading.Timer | None = None
@@ -535,14 +503,7 @@ class WarehouseRepository:
         return curated_tables
 
     def active_sales_mode(self) -> str:
-        """Return the currently published semantic model, defaulting safely.
-
-        This state deliberately is not cached.  A scheduled ingestion worker,
-        API process, and Streamlit process commonly have separate repository
-        objects pointed at the same warehouse.  Caching the value in one
-        process made it serve the schema from a previous import after another
-        process activated a flexible dataset.
-        """
+        """Return the currently published semantic model ('curated' or 'flexible')."""
 
         self.initialize()
         try:
@@ -555,7 +516,7 @@ class WarehouseRepository:
         return mode if mode in {"curated", "flexible"} else "curated"
 
     def ai_schema_catalog(self) -> str:
-        """Build live schema context instead of relying on stale Markdown docs."""
+        """Build warehouse schema catalog string for analytics queries."""
 
         self.initialize()
         table_names = sorted(table.rsplit(".", 1)[1] for table in self.ai_allowed_tables())
@@ -907,7 +868,6 @@ class WarehouseRepository:
         previous = previous_data[0] if previous_data else {}
         prev_cat_map = {row["category"]: row["revenue"] for row in prev_category_data}
 
-        # Category growth
         category_growth = []
         for cat in category_data:
             prev_rev = prev_cat_map.get(cat["category"], 0)
@@ -1148,7 +1108,6 @@ class WarehouseRepository:
             connection.execute("BEGIN TRANSACTION")
             try:
                 connection.execute("INSERT OR IGNORE INTO governance.erased_customers VALUES (?)", [customer_id])
-                # 1. Anonymize personal info in staging.customers
                 connection.execute(
                     """
                     UPDATE staging.customers
@@ -1158,13 +1117,11 @@ class WarehouseRepository:
                     [anonymized_name, anonymized_email, customer_id],
                 )
 
-                # 2. Purge personal web-tracking and behavioral events
                 connection.execute(
                     "DELETE FROM staging.website_events WHERE customer_id = ?",
                     [customer_id],
                 )
 
-                # 3. Refresh dimensional marts so dim_customer immediately reflects erasure
                 self._build_marts(connection)
 
                 connection.execute("COMMIT")

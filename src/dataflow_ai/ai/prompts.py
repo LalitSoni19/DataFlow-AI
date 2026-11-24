@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# Text-to-SQL system prompt with warehouse schema context
 SQL_SYSTEM_PROMPT = """\
 You are a DuckDB SQL expert for an e-commerce analytics warehouse.
 Your ONLY job is to generate SQL queries for questions about THIS warehouse data.
@@ -102,7 +101,6 @@ TABLE analytics.monthly_sales
 - Remember: if the question is off-topic, respond ONLY with: OFF_TOPIC
 """
 
-# Few-shot examples for Text-to-SQL translation
 SQL_FEW_SHOT_EXAMPLES = """\
 === EXAMPLES ===
 
@@ -128,7 +126,7 @@ Q: Average order value by region
 A: SELECT f.region, AVG(order_total)::DOUBLE AS avg_order_value, COUNT(*)::BIGINT AS total_orders FROM (SELECT order_id, region, SUM(net_revenue)::DOUBLE AS order_total FROM analytics.fact_sales GROUP BY order_id, region) AS f GROUP BY f.region ORDER BY avg_order_value DESC
 """
 
-# Synthesis prompt: turns SQL result rows into brief business takeaways
+
 def build_insight_system_prompt(currency_symbol: str = "₹", currency_code: str = "INR") -> str:
     return f"""\
 You are a senior data analyst at an e-commerce company. The user asked a question
@@ -151,9 +149,6 @@ Your job:
 INSIGHT_SYSTEM_PROMPT = build_insight_system_prompt("₹", "INR")
 
 
-# The static examples above remain useful for the curated demo warehouse.  New
-# requests use this live-catalog builder so an uploaded sales export cannot be
-# queried with stale, invented table or column names.
 SQL_ROUTER_TEMPLATE = """\
 You are DataFlow AI, a careful sales analytics assistant.
 

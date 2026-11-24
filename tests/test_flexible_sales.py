@@ -26,8 +26,6 @@ def test_arbitrary_sales_csv_becomes_active_catalog_and_answers_offline(tmp_path
     source = tmp_path / "August_Export_From_CRM.csv"
     _write_sales_csv(source)
     settings = Settings.from_environment(tmp_path)
-    # This repository represents a long-lived API/dashboard process.  It must
-    # see a model activation committed by the separate pipeline worker below.
     repository = WarehouseRepository(settings)
     assert repository.active_sales_mode() == "curated"
 

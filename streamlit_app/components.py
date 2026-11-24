@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent
 for _parent in [_current, *_current.parents]:
@@ -31,7 +30,7 @@ from dataflow_ai.warehouse.repository import WarehouseRepository
 
 LOGGER = logging.getLogger(__name__)
 
-_QUERY_CACHE_TTL: int = 120  # seconds
+_QUERY_CACHE_TTL: int = 120
 
 
 @st.cache_resource
@@ -53,7 +52,6 @@ def get_settings() -> Settings:
             st.error("This identity provider is not configured for this workspace.")
             st.stop()
         return base.workspace(base.oidc_issuer, st.user["sub"])
-    # A public demo session must never publish to another visitor's warehouse.
     if "demo_directory" not in st.session_state:
         st.session_state.demo_directory = TemporaryDirectory(prefix="dataflow-demo-")
     scratch = Path(st.session_state.demo_directory.name)

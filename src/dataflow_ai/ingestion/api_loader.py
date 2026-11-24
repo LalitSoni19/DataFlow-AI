@@ -23,7 +23,6 @@ def validate_safe_api_url(url: str) -> None:
     if not hostname:
         raise ValueError("Invalid URL: missing hostname.")
 
-    # direct IP check
     try:
         ip = ipaddress.ip_address(hostname)
         if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_reserved or ip.is_multicast:
@@ -35,13 +34,11 @@ def validate_safe_api_url(url: str) -> None:
         if "SSRF protection" in str(err):
             raise
 
-    # blocked metadata and local hostnames
     blocked_hostnames = {"localhost", "metadata.google.internal", "instance-data"}
     low_host = hostname.lower()
     if low_host in blocked_hostnames or low_host.endswith((".local", ".internal", ".lan", ".localhost")):
         raise ValueError(f"Access to internal hostname {hostname!r} is forbidden (SSRF protection).")
 
-    # DNS check to catch private IP rebinding
     try:
         resolved = socket.getaddrinfo(hostname, None)
         for _, _, _, _, sockaddr in resolved:
@@ -52,8 +49,6 @@ def validate_safe_api_url(url: str) -> None:
                     f"Access to private/internal network IP address {ip_str} is forbidden (SSRF protection)."
                 )
     except socket.gaierror:
-        # Hostname could not be resolved (e.g. mock test domains like api.vendor.com in unit tests).
-        # urlopen will fail naturally if this is a real invalid connection.
         pass
 
 

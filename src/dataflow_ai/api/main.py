@@ -52,7 +52,6 @@ class _LazyState:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_environment()
 
-    # abort startup on invalid security configuration in production
     if settings.is_production:
         validation_errors = settings.validate_for_deployment()
         if validation_errors:
@@ -70,7 +69,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None if settings.is_production else "/openapi.json",
     )
 
-    # CORS configuration
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
@@ -79,7 +77,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Correlation-ID"],
     )
 
-    # security headers & request correlation id middleware
     @app.middleware("http")
     async def security_and_correlation_middleware(request: Request, call_next):
         correlation_id = (
@@ -100,7 +97,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
         return response
 
-    # log unhandled errors with correlation id and return a safe error message
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))
@@ -115,7 +111,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"X-Correlation-ID": correlation_id},
         )
 
-    # attach correlation id to client HTTP exceptions
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         correlation_id = getattr(request.state, "correlation_id", str(uuid.uuid4()))

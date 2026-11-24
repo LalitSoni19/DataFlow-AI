@@ -148,7 +148,6 @@ def validate_order_items(
         if record.get("discount_amount") not in (None, ""):
             failures.extend(_positive(record, "discount_amount", allow_zero=True))
 
-        # sanity checks on price & discount against catalog
         try:
             qty = float(record.get("quantity") or 0)
             if not qty.is_integer():
@@ -157,7 +156,6 @@ def validate_order_items(
             discount = float(record.get("discount_amount") or 0)
             pid = str(record.get("product_id", ""))
 
-            # price should roughly align with list price
             if pid in catalog:
                 list_price = float(catalog[pid])
                 if submitted_price < (list_price * 0.50):
@@ -171,7 +169,6 @@ def validate_order_items(
                         f"unit_price {submitted_price} exceeds maximum catalog ceiling {list_price * 2.0:.2f}",
                     ))
 
-            # discount cannot exceed line total or 50% max policy cap
             if qty > 0 and submitted_price > 0:
                 gross_total = qty * submitted_price
                 if discount > gross_total:

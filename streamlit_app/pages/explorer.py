@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent.parent
 for _parent in [_current, *_current.parents]:
@@ -38,13 +37,11 @@ if ensure_demo_data():
 
     is_flexible = repository.active_sales_mode() == "flexible"
 
-    # Show approved tables and their columns for reference
     with st.expander("📋 Approved analytics tables & available columns", expanded=False):
         metadata = repository.table_metadata()
         for item in metadata:
             tbl = item['table']
             st.markdown(f"**`{tbl}`** — {item['description']}")
-            # Show live columns for tables
             try:
                 tbl_name = tbl.rsplit(".", 1)[-1]
                 cols = [
@@ -59,7 +56,6 @@ if ensure_demo_data():
             except Exception:
                 pass
 
-    # Quick template queries
     if is_flexible:
         template_options = {
             "Canonical Sales Fact (flex_sales_reporting)": (
@@ -134,18 +130,15 @@ if ensure_demo_data():
 
             st.success(f"Query returned {result.row_count} row(s) in {result.executed_at}")
 
-            # Show the validated SQL
             with st.expander("✅ Validated SQL", expanded=False):
                 st.code(result.sql, language="sql")
                 if result.parameters:
                     st.caption(f"Parameters: {result.parameters}")
 
-            # Display results
             if result.rows:
                 st.subheader("Results")
                 st.dataframe(result.rows, use_container_width=True, hide_index=True)
 
-                # CSV download
                 csv_buffer = io.StringIO()
                 if result.rows:
                     writer = csv.DictWriter(csv_buffer, fieldnames=result.columns)

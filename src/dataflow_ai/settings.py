@@ -134,8 +134,6 @@ class Settings:
         return scoped
 
     def with_data_root(self, root: Path) -> Settings:
-        # Workspace receipts nest dataset, partition and run ID below this root.
-        # Windows extended paths address the same files without the MAX_PATH cap.
         if os.name == "nt":
             absolute = root.resolve()
             windows_path = absolute.as_posix()
@@ -231,7 +229,6 @@ class Settings:
         motherduck_token = env("MOTHERDUCK_TOKEN") or None
         database_url_raw = env("DATAFLOW_DATABASE_URL") or None
 
-        # If MotherDuck token is set but no explicit database URL, default to md:dataflow_ai
         if motherduck_token and not database_url_raw:
             database_url_raw = "md:dataflow_ai"
 
@@ -308,7 +305,6 @@ class Settings:
         return errors
 
     def ensure_directories(self) -> None:
-        # When using a cloud database, local warehouse directory is not needed.
         directories = [
             self.raw_dir,
             self.processed_dir,

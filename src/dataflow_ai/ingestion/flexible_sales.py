@@ -17,7 +17,6 @@ from typing import Any, Iterable, Mapping
 SUPPORTED_SALES_EXTENSIONS = {".csv", ".tsv", ".json", ".jsonl", ".xlsx"}
 _IDENTIFIER_PATTERN = re.compile(r"[^a-z0-9]+")
 
-# Common column name aliases mapped to canonical field names
 SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "sales_date": (
         "order_date", "invoice_date", "sale_date", "sales_date", "transaction_date",
@@ -442,7 +441,6 @@ def _canonical_row(
         elif unit_price is not None:
             revenue = max(unit_price - discount, 0.0)
 
-    # Detect currency from column, or fallback to currency symbols in raw measures
     currency_val = text("currency")
     if not currency_val:
         for field in ("revenue", "unit_price", "price", "amount", "total"):
@@ -512,18 +510,13 @@ def _parse_number(value: Any) -> Decimal | None:
     text = str(value).strip()
     negative = text.startswith("(") and text.endswith(")")
     text = text.strip("()")
-    # Strip currency symbols and common currency codes before the identifier check
-    # so values like "$1,200", "USD 1200", "₹5,000", "INR 5000", or "Rs. 5000" are parsed as numbers.
     stripped_for_alpha_check = re.sub(
         r"[\s₹$€£¥(),.%-]|(?i:\b(usd|inr|eur|gbp|cad|aud|rs\.?|rupees?|dollars?)\b\.?)",
         "",
         text,
     )
-    # Values that mix alphabetic characters with digits (e.g. "INV-1",
-    # "ORD-002", "SKU-100") are identifiers, not numbers.
     if re.search(r"[a-zA-Z]", stripped_for_alpha_check) and re.search(r"[0-9]", stripped_for_alpha_check):
         return None
-    # Remove currency tokens and symbols from text so "Rs. 5000" does not leave an unwanted dot
     clean_text = re.sub(r"(?i)\b(usd|inr|eur|gbp|cad|aud|rs\.?|rupees?|dollars?)\b\.?", "", text)
     clean_text = re.sub(r"[\s₹$€£¥]", "", clean_text)
     if "," in clean_text:

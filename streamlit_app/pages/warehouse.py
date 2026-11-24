@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent.parent
 for _parent in [_current, *_current.parents]:
@@ -41,10 +40,7 @@ if ensure_demo_data():
         st.stop()
     description = next(item["description"] for item in metadata if item["table"] == selected)
     st.caption(description)
-    # SAFETY: 'selected' is constrained to the hardcoded allowed_tables set above (line 14-16).
-    # DuckDB does not support parameterized table names, so f-string is the accepted pattern here.
     raw_rows = repository.fetch_all(f"SELECT * FROM {selected} LIMIT 100")
-    # Apply field-level PII masking for any table containing customer/sales personal data
     has_customer_fields = any(term in selected.lower() for term in ("customer", "upload", "flex"))
     rows = [mask_record_pii(r) for r in raw_rows] if has_customer_fields else raw_rows
     st.dataframe(rows, use_container_width=True, hide_index=True)
@@ -58,7 +54,6 @@ if ensure_demo_data():
 
     st.divider()
 
-    # Customer privacy and data erasure controls
     from streamlit_app.components import base_settings
     subject, role = "demo", "admin"
     if base_settings().auth_required or base_settings().is_production:

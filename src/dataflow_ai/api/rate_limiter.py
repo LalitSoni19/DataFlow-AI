@@ -38,7 +38,6 @@ def get_client_ip(request: Request) -> str:
 
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded and _is_trusted_proxy(client_host):
-        # use first client IP in forwarded chain
         return forwarded.split(",")[0].strip()
 
     return client_host
@@ -50,7 +49,6 @@ def check_rate_limit(key: str, max_requests: int, window_seconds: int) -> tuple[
     cutoff = now - window_seconds
     with _LOCK:
         history = _REQUEST_HISTORY[key]
-        # prune entries outside the current window
         _REQUEST_HISTORY[key] = [t for t in history if t > cutoff]
         history = _REQUEST_HISTORY[key]
 

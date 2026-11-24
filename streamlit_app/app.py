@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent
 for _parent in [_current, *_current.parents]:

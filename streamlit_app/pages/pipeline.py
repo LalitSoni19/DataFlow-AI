@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent.parent
 for _parent in [_current, *_current.parents]:

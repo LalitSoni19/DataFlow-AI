@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent.parent
 for _parent in [_current, *_current.parents]:
@@ -38,7 +37,6 @@ except ModuleNotFoundError:
 page_heading("Ask your data", "Ask a question about your sales or get guidance on sales strategy.")
 
 if ensure_demo_data():
-    # Show AI provider status
     settings = get_settings()
     if settings.llm_base_url and settings.llm_api_key:
         provider_name = settings.llm_model or "LLM"
@@ -51,7 +49,6 @@ if ensure_demo_data():
             icon="⚠️",
         )
 
-    # Example question suggestions
     st.markdown("**💡 Try asking:**")
     example_cols = st.columns(3)
     examples = [

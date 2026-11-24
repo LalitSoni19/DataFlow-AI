@@ -5,7 +5,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# Ensure project root and src/ are in sys.path for Streamlit Cloud & local execution
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent.parent
 for _parent in [_current, *_current.parents]:
@@ -57,7 +56,6 @@ if ensure_demo_data():
         st.error(f"Warehouse query failed: {error}")
         st.stop()
 
-    # KPI cards with MoM deltas
     revenue_delta = None
     customer_delta = None
     order_delta = None
@@ -97,7 +95,6 @@ if ensure_demo_data():
         st.subheader("Revenue coverage by currency")
         st.dataframe(overview["coverage"], hide_index=True)
         st.caption("Received includes all rows. Net revenue includes completed, paid and fulfilled sales. UNKNOWN means no currency was supplied.")
-    # Monthly trend and category breakdown
     left, right = st.columns([3, 2])
 
     with left.container(border=True):
@@ -119,7 +116,6 @@ if ensure_demo_data():
 
     st.divider()
 
-    # Daily revenue and top products
     left2, right2 = st.columns([3, 2])
 
     with left2.container(border=True):

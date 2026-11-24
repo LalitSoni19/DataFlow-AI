@@ -46,12 +46,10 @@ def test_payments_fail_closed_without_secrets(tmp_path: Path) -> None:
     settings = Settings.from_environment(tmp_path)
     client = TestClient(create_app(settings))
 
-    # Calling Stripe webhook when STRIPE_WEBHOOK_SECRET is not configured returns 500
     stripe_resp = client.post("/api/payments/webhook/stripe", content=b"{}")
     assert stripe_resp.status_code == 500
     assert "STRIPE_WEBHOOK_SECRET must be set" in stripe_resp.json()["detail"]
 
-    # Calling Razorpay webhook when RAZORPAY_WEBHOOK_SECRET is not configured returns 500
     rzp_resp = client.post("/api/payments/webhook/razorpay", content=b"{}")
     assert rzp_resp.status_code == 500
     assert "RAZORPAY_WEBHOOK_SECRET must be set" in rzp_resp.json()["detail"]
@@ -65,7 +63,6 @@ def test_no_reset_token_in_api_response(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.json()
     assert body["status"] == "accepted"
-    # reset_token must never be returned in the client response
     assert body.get("reset_token") is None
 
 
@@ -77,7 +74,6 @@ def test_password_reset_confirm_is_rate_limited(tmp_path: Path) -> None:
     for _ in range(5):
         client.post("/api/auth/password-reset/confirm", json=payload)
 
-    # 6th attempt within window must be rejected with 429 Too Many Requests
     blocked = client.post("/api/auth/password-reset/confirm", json=payload)
     assert blocked.status_code == 429
     assert "Too many requests" in blocked.json()["detail"]
@@ -97,7 +93,6 @@ def test_password_reset_and_login_flow(tmp_path: Path) -> None:
     assert confirm_resp.status_code == 200
     assert "successfully updated" in confirm_resp.json()["message"]
 
-    # Verify login succeeds with the newly updated password
     login_resp = client.post("/api/auth/login", json={"username": "analyst", "password": new_pass})
     assert login_resp.status_code == 200
     assert login_resp.json()["status"] == "authenticated"
@@ -107,7 +102,6 @@ def test_user_account_self_deletion_flow(tmp_path: Path) -> None:
     settings = Settings.from_environment(tmp_path)
     client = TestClient(create_app(settings))
 
-    # Temporarily register a test user in registry
     _USER_REGISTRY["test_delete_me"] = {
         "user_id": "temp-user-001",
         "email": "temp@example.com",
@@ -122,10 +116,8 @@ def test_user_account_self_deletion_flow(tmp_path: Path) -> None:
     assert del_resp.status_code == 200
     assert "permanently deleted" in del_resp.json()["message"]
 
-    # User registry record removed
     assert "test_delete_me" not in _USER_REGISTRY
 
-    # Token is revoked and rejected on verification
     with pytest.raises(ValueError, match="revoked"):
         verify_jwt(token, settings.jwt_secret)
 
@@ -139,17 +131,14 @@ def test_rbac_blocks_customer_from_monthly_reports_and_csv_exports(tmp_path: Pat
     customer_token = create_jwt(user_id="C-0001", role="customer", secret=settings.jwt_secret)
     cust_headers = {"Authorization": f"Bearer {customer_token}"}
 
-    # Customer role is blocked from executive reports (403 Forbidden)
     rep_resp = client.get("/api/reports/monthly?month=2026-08", headers=cust_headers)
     assert rep_resp.status_code == 403
     assert "Forbidden" in rep_resp.json()["detail"]
 
-    # Customer role is blocked from full sales CSV export (403 Forbidden)
     csv_resp = client.get("/api/exports/sales.csv", headers=cust_headers)
     assert csv_resp.status_code == 403
     assert "Forbidden" in csv_resp.json()["detail"]
 
-    # Analyst role can access both
     analyst_token = create_jwt(user_id="analyst-001", role="analyst", secret=settings.jwt_secret)
     analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
     assert client.get("/api/reports/monthly?month=2026-08", headers=analyst_headers).status_code == 200
@@ -160,9 +149,8 @@ def test_rate_limiter_spoof_protection() -> None:
     from fastapi import Request
 
     class DummyClient:
-        host = "203.0.113.195"  # Public untrusted client IP
+        host = "203.0.113.195"
 
-    # Create dummy request with spoofed X-Forwarded-For
     scope = {
         "type": "http",
         "client": ("203.0.113.195", 50000),
@@ -170,7 +158,6 @@ def test_rate_limiter_spoof_protection() -> None:
     }
     request = Request(scope)
 
-    # Untrusted client IP must be returned, not spoofed header
     extracted_ip = get_client_ip(request)
     assert extracted_ip == "203.0.113.195"
 
@@ -182,13 +169,11 @@ def test_pii_masking_with_name_anonymization() -> None:
         "email": "jane@example.com",
         "phone": "555-444-3333",
     }
-    # Without mask_names, name remains readable for UI
     standard = mask_record_pii(record, mask_names=False)
     assert standard["customer_name"] == "Jane Doe"
     assert standard["email"] == "j***@example.com"
     assert standard["phone"] == "[REDACTED_PHONE]"
 
-    # With mask_names=True (for LLM transmission), name is pseudonymized
     masked = mask_record_pii(record, mask_names=True)
     assert masked["customer_name"] == "J*** D***"
     assert masked["email"] == "j***@example.com"

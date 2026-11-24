@@ -87,9 +87,6 @@ CREATE TABLE IF NOT EXISTS governance.ai_audit_log (
     error_message VARCHAR
 );
 
--- Canonical layer for one-or-more user supplied sales exports.  Unlike the
--- curated star schema above, this table is intentionally tolerant of missing
--- product/customer dimensions and is populated only by the flexible importer.
 CREATE TABLE IF NOT EXISTS analytics.flex_sales (
     source_file VARCHAR NOT NULL,
     source_row BIGINT NOT NULL,
@@ -125,9 +122,6 @@ CREATE TABLE IF NOT EXISTS governance.sales_imports (
     PRIMARY KEY (run_id)
 );
 
--- The active logical dataset is metadata only. Historical raw files and
--- import profiles remain available by run ID; switching a dashboard/AI query
--- between a curated batch and a flexible import never deletes either source.
 CREATE TABLE IF NOT EXISTS governance.active_sales_dataset (
     singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
     mode VARCHAR NOT NULL,
@@ -136,7 +130,6 @@ CREATE TABLE IF NOT EXISTS governance.active_sales_dataset (
 );
 
 
--- Coverage includes all received rows. Monetary reports use one currency at a time.
 CREATE OR REPLACE VIEW analytics.flex_sales_classified AS
 SELECT *, CASE upper(trim(currency))
     WHEN '$' THEN 'USD' WHEN '₹' THEN 'INR' WHEN '€' THEN 'EUR' WHEN '£' THEN 'GBP'

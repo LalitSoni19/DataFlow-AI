@@ -43,11 +43,10 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-# In-memory JWT blacklist for revoked tokens
 class TokenBlacklist:
 
     def __init__(self) -> None:
-        self._revoked: dict[str, float] = {}  # jti -> exp_timestamp
+        self._revoked: dict[str, float] = {}
         self._lock = threading.Lock()
 
     def revoke(self, jti: str, exp: float) -> None:
@@ -57,7 +56,6 @@ class TokenBlacklist:
     def is_revoked(self, jti: str) -> bool:
         with self._lock:
             now = time.time()
-            # Clean expired tokens
             self._revoked = {j: e for j, e in self._revoked.items() if e > now}
             return jti in self._revoked
 
@@ -122,7 +120,6 @@ def verify_jwt(token: str, secret: str) -> dict:
     if header.get("alg") != "HS256":
         raise ValueError(f"Unsupported JWT algorithm: {header.get('alg')!r}. Only HS256 is permitted.")
 
-    # verify HMAC signature
     signing_input = f"{encoded_header}.{encoded_payload}".encode("utf-8")
     expected_sig = hmac.new(secret.encode("utf-8"), signing_input, hashlib.sha256).digest()
     try:
@@ -138,7 +135,6 @@ def verify_jwt(token: str, secret: str) -> dict:
     except Exception as error:
         raise ValueError("Invalid JWT payload encoding.") from error
 
-    # check expiration
     now = time.time()
     exp = payload.get("exp")
     if exp is None or not isinstance(exp, (int, float)):
@@ -146,7 +142,6 @@ def verify_jwt(token: str, secret: str) -> dict:
     if now > exp:
         raise ValueError("JWT has expired.")
 
-    # check revocation list
     jti = payload.get("jti")
     if jti and TOKEN_BLACKLIST.is_revoked(jti):
         raise ValueError("JWT has been revoked (logged out).")
@@ -154,11 +149,10 @@ def verify_jwt(token: str, secret: str) -> dict:
     return payload
 
 
-# In-memory store for single-use password reset tokens (max 15 min TTL)
 class PasswordResetStore:
 
     def __init__(self, ttl_minutes: int = 15) -> None:
-        self.ttl_minutes = min(ttl_minutes, 15)  # Enforce 15-minute max
+        self.ttl_minutes = min(ttl_minutes, 15)
         self._tokens: dict[str, dict] = {}
         self._lock = threading.Lock()
 
@@ -188,7 +182,6 @@ class PasswordResetStore:
             if now > record["expires_at"]:
                 del self._tokens[token_hash]
                 raise ValueError("Password reset token has expired (15 minute limit exceeded).")
-            # mark token as used immediately
             record["used"] = True
             return record["email"]
 
@@ -200,7 +193,6 @@ class PasswordResetStore:
 RESET_TOKEN_STORE = PasswordResetStore(ttl_minutes=15)
 
 
-# Webhook signature verifiers
 def verify_stripe_webhook_signature(
     payload: bytes,
     sig_header: str | None,
@@ -228,7 +220,6 @@ def verify_stripe_webhook_signature(
     except ValueError:
         return False
 
-    # timestamp must fall within tolerance window to prevent replay attacks
     if abs(time.time() - timestamp_int) > tolerance_seconds:
         return False
 

@@ -62,7 +62,6 @@ class AuthResponse(BaseModel):
     reset_token: str | None = None
 
 
-# In-memory users for local testing / demo
 _USER_REGISTRY: dict[str, dict[str, Any]] = {
     "admin": {
         "user_id": "admin-001",
@@ -141,11 +140,9 @@ def get_current_user(request: Request) -> UserSession:
         except ValueError as err:
             raise HTTPException(status_code=401, detail="Authentication failed: Invalid or expired token.") from err
 
-    # no header provided
     if is_production or auth_required:
         raise HTTPException(status_code=401, detail="Authentication credentials were not provided.")
 
-    # default dev admin session when running locally without auth enforcement
     return UserSession(user_id="dev-admin", role="admin", jti="dev-session", exp=float("inf"))
 
 
@@ -209,7 +206,6 @@ def confirm_password_reset(payload: ConfirmPasswordResetRequest) -> dict[str, st
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
 
-    # Update matching user password in registry if present
     for user_data in _USER_REGISTRY.values():
         if user_data.get("email", "").lower() == email.lower():
             user_data["password_hash"] = hash_password(payload.new_password)

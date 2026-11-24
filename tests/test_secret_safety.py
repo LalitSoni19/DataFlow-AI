@@ -30,13 +30,11 @@ def test_sanitize_secret_string_masks_sensitive_patterns() -> None:
 
 
 def test_sanitize_uri_masks_passwords_and_query_tokens() -> None:
-    # Database URIs
     db_uri = "postgresql://analytics_user:super_secret_password_123@db.internal:5432/warehouse"
     sanitized_db = sanitize_uri(db_uri)
     assert "super_secret_password_123" not in sanitized_db
     assert sanitized_db == "postgresql://analytics_user:***@db.internal:5432/warehouse"
 
-    # API query parameters
     api_uri = "https://api.example.com/v1/feed?api_key=secret_key_abc123&region=West&token=tok_456"
     sanitized_api = sanitize_uri(api_uri)
     assert "secret_key_abc123" not in sanitized_api
@@ -50,7 +48,6 @@ def test_sanitize_uri_masks_passwords_and_query_tokens() -> None:
 
 
 def test_settings_has_no_hardcoded_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    # Ensure no environment variables are set
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("DATAFLOW_DATABASE_URL", raising=False)
     monkeypatch.delenv("INGESTION_API_KEY", raising=False)
@@ -60,7 +57,6 @@ def test_settings_has_no_hardcoded_secrets(monkeypatch: pytest.MonkeyPatch, tmp_
     assert settings.database_url is None
     assert settings.ingestion_api_key is None
 
-    # Verify overrides via environment variables
     monkeypatch.setenv("LLM_API_KEY", "env_provided_key")
     monkeypatch.setenv("DATAFLOW_DATABASE_URL", "postgresql://user:pass@host/db")
     monkeypatch.setenv("INGESTION_API_KEY", "env_ingest_token")
@@ -106,7 +102,6 @@ def test_assistant_warning_sanitizes_secrets(tmp_path: Path) -> None:
     assistant = AnalyticsAssistant(settings)
     assistant.repository.initialize()
 
-    # Force an LLM error that contains sensitive text
     with patch.object(assistant, "llm", MagicMock()):
         assistant.llm.complete.side_effect = LLMError("Failed connecting with Bearer secret_token_xyz")  # type: ignore
         response = assistant.ask("Unusual question that triggers LLM fallback")

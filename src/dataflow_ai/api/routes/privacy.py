@@ -20,7 +20,6 @@ def customer_privacy_status(
     customer_id: str,
     current_user: UserSession = Depends(get_current_user),
 ) -> dict:
-    # verify user owns this customer record or has admin/dpo permissions
     if current_user.user_id != customer_id and current_user.role not in ("admin", "dpo"):
         raise HTTPException(
             status_code=403,
@@ -40,7 +39,6 @@ def delete_customer_personal_data(
     customer_id: str,
     current_user: UserSession = Depends(get_current_user),
 ) -> dict:
-    # verify user owns this customer record or has admin/dpo permissions
     if current_user.user_id != customer_id and current_user.role not in ("admin", "dpo"):
         raise HTTPException(
             status_code=403,

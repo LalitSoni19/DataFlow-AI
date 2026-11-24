@@ -124,7 +124,6 @@ def _validate_tree(expression: exp.Expression, allowed_tables: set[str], maximum
         relation = f"{table.db}.{table.name}" if table.db else table.name
         relation = relation.lower()
         if relation not in allowed_tables and relation not in ctes:
-            # prefix bare table names with analytics schema
             if not table.db and f"analytics.{relation}" in allowed_tables:
                 table.set("db", exp.to_identifier("analytics"))
                 relation = f"analytics.{relation}"

@@ -41,42 +41,32 @@ def clean_test_state() -> None:
     RESET_TOKEN_STORE.clear()
 
 
-# 1. SQL injection and guard bypass tests
-
 @pytest.mark.parametrize(
     "adversarial_sql",
     [
-        # Stacked / multiple statements
         "SELECT * FROM analytics.fact_sales; SELECT * FROM analytics.fact_sales",
         "SELECT * FROM analytics.fact_sales; --",
         "SELECT * FROM analytics.fact_sales; DROP TABLE analytics.fact_sales;",
-        # SQL Comments attempting filter evasion
         "SELECT * FROM analytics.fact_sales /* evil comment */",
         "SELECT * FROM analytics.fact_sales -- line comment",
-        # External scan variants
         "SELECT * FROM read_csv('data/secret.csv')",
         "SELECT * FROM read_json_auto('http://evil.com/leak')",
         "SELECT * FROM read_parquet('s3://confidential/data.parquet')",
         "SELECT * FROM glob('../*')",
-        # Table-valued generator functions DOS attempts
         "SELECT * FROM range(99999999999999)",
         "SELECT * FROM generate_series(1, 100000000)",
-        # Unapproved system catalogs & internal tables
         "SELECT * FROM information_schema.tables",
         "SELECT * FROM duckdb_tables()",
         "SELECT * FROM duckdb_settings()",
         "SELECT * FROM pragma_version()",
-        # Cartesian & Implicit comma joins
         "SELECT * FROM analytics.fact_sales, analytics.dim_customer",
         "SELECT * FROM analytics.fact_sales CROSS JOIN analytics.dim_product",
-        # Disallowed mutation keywords
         "UPDATE analytics.fact_sales SET net_revenue = 0",
         "INSERT INTO analytics.fact_sales SELECT * FROM analytics.fact_sales",
         "DELETE FROM analytics.dim_customer WHERE 1=1",
         "ALTER TABLE analytics.fact_sales ADD COLUMN evil VARCHAR",
         "ATTACH 'evil.db' AS evil",
         "COPY analytics.fact_sales TO 'stolen.csv'",
-        # Excessive row limits (>200)
         "SELECT * FROM analytics.fact_sales LIMIT 2000000",
         "SELECT * FROM analytics.fact_sales LIMIT 201",
     ],
@@ -104,25 +94,19 @@ def test_sql_guard_allows_safe_complex_aggregation() -> None:
     assert "analytics.dim_product" in validated
 
 
-# 2. SSRF prevention tests
-
 @pytest.mark.parametrize(
     "malicious_url",
     [
-        # Loopback variants
         "http://127.0.0.1:8000/api",
         "http://127.0.0.2:80/leak",
         "http://localhost:8501/secret",
         "http://[::1]:8080/data",
-        # Cloud metadata services
         "http://169.254.169.254/latest/meta-data/",
         "http://metadata.google.internal/computeMetadata/v1/",
         "http://instance-data/latest/meta-data/",
-        # Private IP spaces (RFC 1918)
         "http://10.0.0.1/admin",
         "http://172.16.0.1/config",
         "http://192.168.1.1/router",
-        # Dangerous protocols
         "ftp://example.com/file.json",
         "file:///etc/passwd",
         "gopher://evil.com/1",
@@ -134,12 +118,9 @@ def test_ssrf_validator_blocks_internal_and_cloud_ips(malicious_url: str) -> Non
 
 
 def test_ssrf_validator_allows_valid_public_https() -> None:
-    # Public domains should pass URL schema and IP validation
     validate_safe_api_url("https://api.github.com/repos/sample")
     validate_safe_api_url("https://jsonplaceholder.typicode.com/posts")
 
-
-# 3. Data processing input edge cases
 
 def test_pipeline_validation_handles_empty_records() -> None:
     res = validate_customers([])
@@ -150,18 +131,13 @@ def test_pipeline_validation_handles_empty_records() -> None:
 
 def test_pipeline_validation_quarantines_extreme_malformed_customers() -> None:
     malformed_records = [
-        # Missing everything
         {},
-        # Invalid email and future/corrupt date
         {"customer_id": "C-BAD1", "email": "not-an-email", "signup_date": "invalid-date", "region": "North"},
-        # Duplicate customer ID
         {"customer_id": "C-DUP", "email": "valid1@example.com", "signup_date": "2025-01-01", "region": "North"},
         {"customer_id": "C-DUP", "email": "valid2@example.com", "signup_date": "2025-01-01", "region": "South"},
-        # Negative / zero length customer ID whitespace
         {"customer_id": "   ", "email": "valid3@example.com", "signup_date": "2025-01-01", "region": "East"},
     ]
     res = validate_customers(malformed_records)
-    # Exactly one record (the first C-DUP) should pass; all others rejected
     assert len(res.accepted_records) == 1
     assert res.accepted_records[0]["customer_id"] == "C-DUP"
     assert len(res.rejected_records) == 4
@@ -169,15 +145,10 @@ def test_pipeline_validation_quarantines_extreme_malformed_customers() -> None:
 
 def test_order_items_validation_blocks_extreme_negative_pricing_and_discounts() -> None:
     items = [
-        # Normal
         {"order_item_id": "I-1", "order_id": "O-1", "product_id": "P-1", "quantity": 1, "unit_price": 50, "discount_amount": 5},
-        # Extreme negative price
         {"order_item_id": "I-2", "order_id": "O-1", "product_id": "P-1", "quantity": 1, "unit_price": -99999, "discount_amount": 0},
-        # Zero quantity
         {"order_item_id": "I-3", "order_id": "O-1", "product_id": "P-1", "quantity": 0, "unit_price": 10, "discount_amount": 0},
-        # Negative discount
         {"order_item_id": "I-4", "order_id": "O-1", "product_id": "P-1", "quantity": 1, "unit_price": 10, "discount_amount": -100},
-        # Discount greater than gross revenue
         {"order_item_id": "I-5", "order_id": "O-1", "product_id": "P-1", "quantity": 2, "unit_price": 20, "discount_amount": 100},
     ]
     res = validate_order_items(items, order_ids={"O-1"}, product_ids={"P-1"})
@@ -208,10 +179,7 @@ def test_flexible_sales_import_handles_unicode_and_special_characters(tmp_path: 
     assert imported.canonical_rows[0]["customer"] == "Müller & Co."
 
 
-# 4. Token validation edge cases
-
 def test_jwt_verification_rejects_none_algorithm() -> None:
-    # Attempting classic 'none' algorithm bypass attack
     header = base64.urlsafe_b64encode(b'{"alg":"none","typ":"JWT"}').decode().rstrip("=")
     payload = base64.urlsafe_b64encode(b'{"sub":"admin","role":"admin","exp":9999999999}').decode().rstrip("=")
     forged_token = f"{header}.{payload}."
@@ -221,26 +189,20 @@ def test_jwt_verification_rejects_none_algorithm() -> None:
 
 def test_jwt_verification_rejects_expired_and_future_skew() -> None:
     secret = "secure-jwt-secret-key-32-characters-minimum"
-    # Token expired 10 seconds ago
     expired_token = create_jwt("user-1", "analyst", secret, expires_in_seconds=-10)
     with pytest.raises(ValueError, match="expired"):
         verify_jwt(expired_token, secret)
 
 
-# 5. Rate limiting stress tests
-
 def test_api_rate_limiter_rapid_flood(tmp_path: Path) -> None:
     settings = Settings.from_environment(tmp_path)
     client = TestClient(create_app(settings))
 
-    # Send 6 rapid login requests from same client IP
     responses = [
         client.post("/api/auth/login", json={"username": "admin", "password": "WrongPassword123!"})
         for _ in range(6)
     ]
-    # First 5 attempts get 401 Unauthorized (invalid credentials)
     for r in responses[:5]:
         assert r.status_code == 401
-    # 6th attempt must be 429 Too Many Requests
     assert responses[5].status_code == 429
     assert "Too many requests" in responses[5].json()["detail"]

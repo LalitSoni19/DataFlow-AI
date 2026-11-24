@@ -8,13 +8,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-# Ensure the repository's 'src' directory is in sys.path regardless of where the DAG is loaded from
 repo_root = Path(os.getenv("DATAFLOW_PROJECT_ROOT", Path(__file__).resolve().parents[2])).resolve()
 src_dir = str(repo_root / "src")
 if src_dir not in sys.path:
     sys.path.insert(0, src_dir)
 
-# Import Airflow TaskFlow API with fallback support for Airflow 3, Airflow 2, or missing installation
 try:
     from airflow.sdk import dag, task  # type: ignore
     HAS_AIRFLOW = True
@@ -37,7 +35,6 @@ except ImportError:
                 return func
             return decorator
 
-# Use pendulum if installed (standard in Airflow environments), otherwise standard datetime
 try:
     from pendulum import datetime as pendulum_datetime  # type: ignore
     dag_start_date = pendulum_datetime(2026, 1, 1, tz="UTC")

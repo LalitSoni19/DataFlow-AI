@@ -16,7 +16,6 @@ from dataflow_ai.settings import Settings
 @pytest.fixture(autouse=True)
 def clean_rate_limits_and_env(monkeypatch: pytest.MonkeyPatch) -> None:
     reset_rate_limiter()
-    # Ensure test environment is clean of host overrides
     monkeypatch.delenv("DATAFLOW_DEBUG", raising=False)
     monkeypatch.delenv("DATAFLOW_ENV", raising=False)
     monkeypatch.delenv("ENVIRONMENT", raising=False)
@@ -46,7 +45,6 @@ def test_unhandled_error_shields_stack_trace_and_returns_correlation_id(tmp_path
     settings = Settings.from_environment(tmp_path)
     app = create_app(settings)
 
-    # Simulate an unhandled exception in an endpoint
     @app.get("/api/test-simulated-error")
     def fail_endpoint() -> None:
         raise RuntimeError("Sensitive internal database connection failed: postgresql://admin:secret@10.0.0.1/db")
@@ -57,13 +55,11 @@ def test_unhandled_error_shields_stack_trace_and_returns_correlation_id(tmp_path
     assert response.status_code == 500
     body = response.json()
 
-    # Verify no traceback, file path, or database details leaked
     assert "Sensitive internal database" not in response.text
     assert "postgresql://" not in response.text
     assert "Traceback" not in response.text
     assert "File " not in response.text
 
-    # Verify generic message and correlation ID returned
     assert "An internal server error occurred" in body["detail"]
     assert "correlation_id" in body
     assert body["correlation_id"] == response.headers.get("x-correlation-id")
@@ -75,12 +71,10 @@ def test_rate_limiting_on_login(tmp_path: Path) -> None:
 
     payload = {"username": "testuser", "password": "SuperSecurePassword123"}
 
-    # Allowed: 5 requests per minute
     for _ in range(5):
         resp = client.post("/api/auth/login", json=payload)
-        assert resp.status_code == 401  # Normal invalid credential response, not rate limited
+        assert resp.status_code == 401
 
-    # 6th request: Exceeded limit -> HTTP 429
     blocked_resp = client.post("/api/auth/login", json=payload)
     assert blocked_resp.status_code == 429
     assert "Too many requests" in blocked_resp.json()["detail"]
@@ -93,12 +87,10 @@ def test_rate_limiting_on_password_reset(tmp_path: Path) -> None:
 
     payload = {"email": "user@example.com"}
 
-    # Allowed: 3 requests per hour
     for _ in range(3):
         resp = client.post("/api/auth/password-reset", json=payload)
         assert resp.status_code == 200
 
-    # 4th request: Exceeded limit -> HTTP 429
     blocked_resp = client.post("/api/auth/password-reset", json=payload)
     assert blocked_resp.status_code == 429
     assert "Too many requests" in blocked_resp.json()["detail"]
@@ -106,7 +98,6 @@ def test_rate_limiting_on_password_reset(tmp_path: Path) -> None:
 
 
 def test_production_validator_enforces_database_tls(tmp_path: Path) -> None:
-    # 1. Insecure non-SSL Postgres URL in production
     insecure_settings = replace(
         Settings.from_environment(tmp_path),
         environment="production",
@@ -115,7 +106,6 @@ def test_production_validator_enforces_database_tls(tmp_path: Path) -> None:
     errors = insecure_settings.validate_for_deployment()
     assert any("TLS/SSL" in err for err in errors)
 
-    # 2. Secure Postgres URL with TLS enforced
     secure_settings = replace(
         insecure_settings,
         database_url="postgresql://app_user:valid_secret_123@db.internal:5432/warehouse?sslmode=require",

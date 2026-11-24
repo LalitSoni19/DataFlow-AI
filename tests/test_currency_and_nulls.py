@@ -25,7 +25,6 @@ def test_parse_number_with_currency_tokens() -> None:
     assert _parse_number("INR 5,000") == Decimal("5000")
     assert _parse_number("Rs. 5,000") == Decimal("5000")
     assert _parse_number("(500.00)") == Decimal("-500.00")
-    # Identifiers should still be safely rejected
     assert _parse_number("INV-001") is None
     assert _parse_number("SKU-999") is None
 
@@ -40,9 +39,7 @@ def test_customer_name_visible_and_pii_masked() -> None:
         "revenue": 1500.0,
     }
     masked = mask_record_pii(record)
-    # Customer name MUST be visible
     assert masked["customer_name"] == "Aarav Sharma"
-    # Confidential data MUST be masked
     assert masked["phone"] == "[REDACTED_PHONE]"
     assert masked["mobile"] == "[REDACTED_PHONE]"
     assert masked["address"] == "[REDACTED_ADDRESS]"
@@ -58,7 +55,6 @@ def test_null_handling_in_records() -> None:
         "revenue": 200.0,
     }
     masked = mask_record_pii(record_with_nulls)
-    # Null customer name should cleanly default to Unknown without throwing an error
     assert masked["customer_name"] == "Unknown"
     assert masked["region"] == "Unspecified"
     assert masked["status"] == "completed"

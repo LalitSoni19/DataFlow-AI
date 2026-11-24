@@ -87,14 +87,12 @@ def sanitize_uri(uri: str | None) -> str:
         if not parts.scheme:
             return sanitize_secret_string(uri)
 
-        # redact embedded user:password
         netloc = parts.netloc
         if "@" in netloc and ":" in netloc.split("@")[0]:
             userpass, hostport = netloc.split("@", 1)
             user = userpass.split(":", 1)[0]
             netloc = f"{user}:***@{hostport}"
 
-        # redact sensitive query params (api_key, token, secret, etc.)
         query_pairs = parse_qsl(parts.query, keep_blank_values=True)
         sanitized_pairs = [
             (k, "[REDACTED]" if k.lower() in SENSITIVE_PARAM_NAMES else v)
@@ -158,7 +156,6 @@ def mask_record_pii(record: dict[str, Any], *, mask_names: bool = False) -> dict
     masked = dict(record)
     for key, value in record.items():
         low_key = key.lower()
-        # provide readable defaults for empty / null values
         if value is None or (isinstance(value, str) and value.strip().lower() in {"", "null", "none", "nan"}):
             if low_key in {"active_customers", "total_customers", "customers"}:
                 continue
@@ -171,7 +168,6 @@ def mask_record_pii(record: dict[str, Any], *, mask_names: bool = False) -> dict
             continue
 
         str_val = str(value).strip()
-        # redact phone, address, secrets, and emails
         if any(term in low_key for term in ("phone", "mobile", "contact_no", "cell")):
             masked[key] = "[REDACTED_PHONE]"
         elif any(term in low_key for term in ("address", "street", "postal", "zip", "zipcode")):

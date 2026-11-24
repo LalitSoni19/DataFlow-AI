@@ -51,7 +51,6 @@ def clean_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             clean_key = key.strip().lower().replace(" ", "_")
             normalized[clean_key] = _clean_value(clean_key, value)
 
-        # fallback defaults for missing non-critical attributes
         if "customer_name" in normalized and not normalized["customer_name"]:
             normalized["customer_name"] = "Unknown"
         elif "customer_id" in normalized and "customer_name" not in normalized:

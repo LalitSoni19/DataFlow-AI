@@ -53,18 +53,15 @@ def test_bad_model_sql_gets_one_safe_repair_attempt(tmp_path: Path) -> None:
 def test_parse_json_object_handles_markdown_and_prose() -> None:
     from dataflow_ai.ai.assistant import _parse_json_object
 
-    # Direct JSON
     assert _parse_json_object('{"intent": "warehouse_query", "sql": "SELECT 1"}') == {
         "intent": "warehouse_query",
         "sql": "SELECT 1",
     }
 
-    # Markdown block
     assert _parse_json_object(
         '```json\n{"intent": "clarify", "answer": "Which month?"}\n```'
     ) == {"intent": "clarify", "answer": "Which month?"}
 
-    # Markdown with surrounding text
     raw_with_prose = (
         "Here is the parsed routing decision:\n"
         "```json\n"

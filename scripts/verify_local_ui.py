@@ -24,7 +24,6 @@ def port():
 
 with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
     stack.callback(os.chdir, os.getcwd())
-    # Prevent developer or deployment credentials from reaching the fixture.
     for name in list(os.environ):
         if name.upper().startswith(("DATAFLOW_", "LLM_", "OLLAMA_", "MOTHERDUCK", "GEMINI_", "STREAMLIT_")):
             del os.environ[name]
