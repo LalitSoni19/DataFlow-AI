@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from datetime import datetime
@@ -32,7 +33,7 @@ def _positive(record: dict[str, Any], field: str, *, allow_zero: bool = False) -
         numeric = float(record[field])
     except (KeyError, TypeError, ValueError):
         return [("numeric", f"{field} must be numeric")]
-    valid = numeric >= 0 if allow_zero else numeric > 0
+    valid = math.isfinite(numeric) and (numeric >= 0 if allow_zero else numeric > 0)
     return [] if valid else [("range", f"{field} must be {'non-negative' if allow_zero else 'greater than zero'}")]
 
 
@@ -150,6 +151,8 @@ def validate_order_items(
         # sanity checks on price & discount against catalog
         try:
             qty = float(record.get("quantity") or 0)
+            if not qty.is_integer():
+                failures.append(("quantity", "curated order quantity must be a whole number"))
             submitted_price = float(record.get("unit_price") or 0)
             discount = float(record.get("discount_amount") or 0)
             pid = str(record.get("product_id", ""))

@@ -59,150 +59,19 @@ if ensure_demo_data():
                 st.error(f"Failed to generate report: {error}")
                 st.stop()
 
-        # Header metrics
-        st.subheader(f"Monthly Business Summary — {selected_month}")
+        from dataflow_ai.reports import monthly_report_text
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(
-            "Total Sales",
-            currency(summary["total_revenue"]),
-            delta=f"{summary['revenue_change_pct']:+.1f}% from {summary['previous_month']}",
-        )
-        c2.metric(
-            "Total Orders",
-            f"{summary['total_orders']:,}",
-        )
-        c3.metric(
-            "Total Customers",
-            f"{summary['total_customers']:,}",
-            delta=f"{summary['customer_change_pct']:+.1f}%",
-        )
-        c4.metric(
-            "Avg Line Value",
-            currency(summary["avg_line_value"]),
-        )
-
-        st.divider()
-
-        # Monthly insights
-        direction = "increased" if summary["revenue_change_pct"] >= 0 else "decreased"
-        abs_change = abs(summary["revenue_change_pct"])
-
-        insights = [
-            (f"**Total sales: {currency(summary['total_revenue'])}** "
-             f"({'↑' if summary['revenue_change_pct'] >= 0 else '↓'} {abs_change:.1f}% from last month)"),
-            (f"**Highest growth in {summary['highest_growth_category']}** "
-             f"({'↑' if summary['highest_growth_pct'] >= 0 else '↓'} {abs(summary['highest_growth_pct']):.1f}%)"),
-            (f"**Customer base {'increased' if summary['customer_change_pct'] >= 0 else 'decreased'}** "
-             f"by {abs(summary['customer_change_pct']):.1f}%"),
-            f"**Top performing region: {summary['top_region']}** ({currency(summary['top_region_revenue'])})",
-        ]
-
-        # Generate recommendation based on data
-        recommendations = []
-        if summary["revenue_change_pct"] < 0:
-            recommendations.append(
-                "Revenue declined this month. Review marketing campaigns and investigate "
-                "underperforming regions for potential recovery opportunities."
-            )
-        else:
-            recommendations.append(
-                "Revenue is trending positively. Consider increasing inventory for high-demand products "
-                "and continue the current marketing campaign."
-            )
-
-        # Find weakest region
-        if summary["regions"]:
-            weakest = summary["regions"][-1]
-            recommendations.append(
-                f"Focus growth efforts on **{weakest['region']}** region "
-                f"(currently {currency(weakest['revenue'])}) to balance regional performance."
-            )
-
-        st.subheader("📈 Key Insights")
-        for insight in insights:
-            st.markdown(f"• {insight}")
-
-        st.subheader("💡 Recommendations")
-        for rec in recommendations:
-            st.markdown(f"• {rec}")
-
-        st.divider()
-
-        # Category performance table
-        st.subheader("Category Performance")
-        if summary["categories"]:
-            st.dataframe(
-                [
-                    {
-                        "Category": cat["category"],
-                        "Revenue": currency(cat["revenue"]),
-                        "Units Sold": cat["units_sold"],
-                        "Growth %": f"{cat['growth_pct']:+.1f}%",
-                    }
-                    for cat in summary["categories"]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        # Regional breakdown
-        st.subheader("Revenue by Region")
-        if summary["regions"]:
-            st.dataframe(
-                [
-                    {
-                        "Region": r["region"],
-                        "Revenue": currency(r["revenue"]),
-                        "Orders": r["orders"],
-                    }
-                    for r in summary["regions"]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-
-        st.divider()
-
-        # Downloadable markdown report
-        report_lines = [
-            "# Monthly Business Report",
-            "",
-            f"## Business Summary — {selected_month}",
-            "",
-            (f"- Total sales: {currency(summary['total_revenue'])} "
-             f"({'↑' if summary['revenue_change_pct'] >= 0 else '↓'} {abs_change:.1f}% from last month)"),
-            (f"- Highest growth in {summary['highest_growth_category']} "
-             f"({'↑' if summary['highest_growth_pct'] >= 0 else '↓'} {abs(summary['highest_growth_pct']):.1f}%)"),
-            (f"- Customer base {'increased' if summary['customer_change_pct'] >= 0 else 'decreased'} "
-             f"by {abs(summary['customer_change_pct']):.1f}%"),
-            f"- Top performing region: {summary['top_region']} ({currency(summary['top_region_revenue'])})",
-            "",
-            "## Recommendations",
-        ]
-        for rec in recommendations:
-            report_lines.append(f"- {rec.replace('**', '')}")
-        report_lines.extend([
-            "",
-            "## Category Performance",
-        ])
-        for cat in summary["categories"]:
-            report_lines.append(
-                f"- {cat['category']}: {currency(cat['revenue'])} ({cat['growth_pct']:+.1f}% growth)"
-            )
-        report_lines.extend([
-            "",
-            "## Revenue by Region",
-        ])
-        for r in summary["regions"]:
-            report_lines.append(f"- {r['region']}: {currency(r['revenue'])} across {r['orders']:,} orders")
-
-        report_text = "\n".join(report_lines) + "\n"
-
-        st.download_button(
-            "📥 Download Report",
-            report_text,
-            file_name=f"business_report_{selected_month}.md",
-            mime="text/markdown",
-            type="primary",
-        )
+        st.subheader(f"Monthly summary · {selected_month}")
+        code = repository.active_currency_code()
+        cards = st.columns(4)
+        cards[0].metric(f"Net revenue ({code})", currency(summary["total_revenue"]),
+                        delta=(f"{summary['revenue_change_pct']:+.1f}% vs prior month"
+                               if summary["revenue_change_pct"] is not None else None))
+        for card, label, key in zip(cards[1:3], ("Orders", "Customers"), ("total_orders", "total_customers")):
+            card.metric(label, "Unavailable" if summary[key] is None else format(summary[key], ","))
+        cards[3].metric("Average line value", currency(summary["avg_line_value"]))
+        report = monthly_report_text(summary, code)
+        st.text(report)
+        st.subheader("Category performance")
+        st.dataframe(summary["categories"], hide_index=True)
+        st.download_button("Download monthly report", report, file_name=f"sales-{selected_month}.md")

@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from dataflow_ai.warehouse.repository import WarehouseRepository
 from dataflow_ai.ai.assistant import AnalyticsAssistant
 from dataflow_ai.api.rate_limiter import rate_limit_dependency
 from dataflow_ai.api.routes.auth import UserSession, get_current_user
@@ -24,7 +25,8 @@ def ask(
     payload: AskRequest,
     current_user: UserSession = Depends(get_current_user),
 ) -> dict:
-    assistant: AnalyticsAssistant = request.app.state.assistant
+    settings = getattr(request.state, "workspace_settings", request.app.state.settings)
+    assistant = AnalyticsAssistant(settings, WarehouseRepository(settings, request.query_params.get("currency")))
     try:
         return assistant.ask(payload.question).to_dict()
     except ValueError as error:

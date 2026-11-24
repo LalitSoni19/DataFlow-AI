@@ -135,3 +135,18 @@ CREATE TABLE IF NOT EXISTS governance.active_sales_dataset (
     activated_at TIMESTAMP NOT NULL
 );
 
+
+-- Coverage includes all received rows. Monetary reports use one currency at a time.
+CREATE OR REPLACE VIEW analytics.flex_sales_classified AS
+SELECT *, CASE upper(trim(currency))
+    WHEN '$' THEN 'USD' WHEN '₹' THEN 'INR' WHEN '€' THEN 'EUR' WHEN '£' THEN 'GBP'
+    ELSE coalesce(nullif(upper(trim(currency)), ''), 'UNKNOWN') END AS currency_code
+FROM analytics.flex_sales;
+
+CREATE OR REPLACE VIEW analytics.flex_sales_reporting AS
+SELECT * FROM analytics.flex_sales_classified
+WHERE lower(trim(status)) IN ('completed', 'paid', 'fulfilled')
+AND currency_code = coalesce(getvariable('report_currency')::VARCHAR,
+    (SELECT min(currency_code) FROM analytics.flex_sales_classified));
+
+CREATE TABLE IF NOT EXISTS governance.erased_customers (customer_id VARCHAR PRIMARY KEY);

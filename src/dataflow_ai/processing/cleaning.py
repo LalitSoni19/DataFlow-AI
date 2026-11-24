@@ -61,8 +61,8 @@ def clean_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
             normalized["region"] = "Unspecified"
         if "category" in normalized and not normalized["category"]:
             normalized["category"] = "Unspecified"
-        if "status" in normalized and not normalized["status"]:
-            normalized["status"] = "completed"
+        if "order_item_id" in normalized and normalized.get("discount_amount") in (None, ""):
+            normalized["discount_amount"] = 0
 
         cleaned.append(normalized)
     return cleaned

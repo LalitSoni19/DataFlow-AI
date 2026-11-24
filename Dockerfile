@@ -19,6 +19,7 @@ RUN python -m pip install --no-cache-dir .
 COPY scripts ./scripts
 COPY docs ./docs
 COPY streamlit_app ./streamlit_app
+COPY .streamlit/config.toml ./.streamlit/config.toml
 COPY airflow ./airflow
 
 RUN mkdir -p /app/data /app/logs && chown -R dataflow:dataflow /app

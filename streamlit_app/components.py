@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from tempfile import TemporaryDirectory
 import logging
 import sys
 from pathlib import Path
@@ -33,43 +34,61 @@ _QUERY_CACHE_TTL: int = 120  # seconds
 
 
 @st.cache_resource
-def get_settings() -> Settings:
+def base_settings() -> Settings:
     return Settings.from_environment(PROJECT_ROOT)
 
 
-@st.cache_resource
+def get_settings() -> Settings:
+    base = base_settings()
+    if base.is_production or base.auth_required:
+        if not base.oidc_issuer:
+            st.error("Configure the workspace identity provider before signing in.")
+            st.stop()
+        if not st.user.is_logged_in:
+            if st.button("Sign in to your workspace", type="primary"):
+                st.login()
+            st.stop()
+        if st.user.get("iss") != base.oidc_issuer or not st.user.get("sub"):
+            st.error("This identity provider is not configured for this workspace.")
+            st.stop()
+        return base.workspace(base.oidc_issuer, st.user["sub"])
+    # A public demo session must never publish to another visitor's warehouse.
+    if "demo_directory" not in st.session_state:
+        st.session_state.demo_directory = TemporaryDirectory(prefix="dataflow-demo-")
+    return base.with_data_root(Path(st.session_state.demo_directory.name))
+
+
 def get_repository() -> WarehouseRepository:
-    return WarehouseRepository(get_settings())
+    settings = get_settings()
+    code = st.session_state.get("report_currency")
+    key = (str(settings.database_path), code)
+    if st.session_state.get("_repo_key") != key:
+        st.session_state["_repository"] = WarehouseRepository(settings, code)
+        st.session_state["_repo_key"] = key
+    return st.session_state["_repository"]
 
 
-@st.cache_resource
-def get_assistant():  # noqa: ANN201
+def get_assistant():
     from dataflow_ai.ai.assistant import AnalyticsAssistant
-
     return AnalyticsAssistant(get_settings(), get_repository())
 
 
-@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
 def cached_kpi_overview() -> dict[str, Any]:
     return get_repository().kpi_overview()
 
 
-@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
 def cached_sales(start: str | None = None, end: str | None = None, region: str | None = None) -> list[dict[str, Any]]:
     return get_repository().sales(start, end, region)
 
 
-@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
 def cached_top_products(limit: int = 10) -> list[dict[str, Any]]:
     return get_repository().top_products(limit)
 
 
-@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
 def cached_monthly_trend(months: int = 6) -> list[dict[str, Any]]:
     return get_repository().monthly_trend(months)
 
 
-@st.cache_data(ttl=_QUERY_CACHE_TTL, show_spinner=False)
 def cached_sales_by_category() -> list[dict[str, Any]]:
     return get_repository().sales_by_category()
 
@@ -81,18 +100,11 @@ def _warehouse_ready() -> bool:
     For local DuckDB, a fast file-existence check is sufficient.
     """
     settings = get_settings()
-    if settings.is_cloud_database:
-        try:
-            repo = get_repository()
-            with repo.connection(read_only=True) as conn:
-                result = conn.execute(
-                    "SELECT COUNT(*) FROM information_schema.tables "
-                    "WHERE table_schema = 'analytics' AND table_name = 'fact_sales'"
-                ).fetchone()
-                return bool(result and result[0] > 0)
-        except Exception:
-            return False
-    return settings.database_path.exists()
+    if not settings.is_cloud_database and not settings.database_path.exists():
+        return False
+    repo = get_repository()
+    repo.initialize()
+    return bool(repo.fetch_all("SELECT mode FROM governance.active_sales_dataset LIMIT 1"))
 
 
 def ensure_demo_data() -> bool:
@@ -100,6 +112,14 @@ def ensure_demo_data() -> bool:
     _show_connection_badge()
 
     if _warehouse_ready():
+        repo = get_repository()
+        if repo.active_sales_mode() == "flexible":
+            codes = [row["currency_code"] for row in repo.currency_coverage()]
+            if codes:
+                st.sidebar.selectbox("Reporting currency", codes, key="report_currency")
+        active = repo.fetch_all("SELECT mode, activated_at FROM governance.active_sales_dataset LIMIT 1")
+        if active:
+            st.sidebar.caption(f"{active[0]['mode'].title()} dataset · Published {active[0]['activated_at']}")
         return True
 
     settings = get_settings()
@@ -146,8 +166,10 @@ def currency(value: float | None, symbol: str | None = None) -> str:
             repo = get_repository()
             symbol = repo.active_currency_symbol()
         except Exception:
-            symbol = "₹"
-    val = float(value or 0)
+            symbol = ""
+    if value is None:
+        return "Unavailable"
+    val = float(value)
     if symbol == "$":
         if abs(val - round(val)) > 0.005:
             return f"${val:,.2f}"

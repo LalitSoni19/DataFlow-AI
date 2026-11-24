@@ -81,14 +81,22 @@ if ensure_demo_data():
 
     curr_sym = get_repository().active_currency_symbol()
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Total Sales", currency(overview.get("total_sales_amount") or overview.get("total_revenue")), delta=revenue_delta)
-    m2.metric("Total Customers", f"{int(overview.get('active_customers') or 0):,}", delta=customer_delta)
-    m3.metric("Total Orders", f"{int(overview.get('total_orders') or 0):,}", delta=order_delta)
+    m1.metric("Net revenue", currency(overview.get("total_revenue"), curr_sym), delta=revenue_delta)
+    m2.metric("Total Customers", format(overview["active_customers"], ",") if overview["active_customers"] is not None else "Unavailable", delta=customer_delta)
+    m3.metric("Total Orders", format(overview["total_orders"], ",") if overview["total_orders"] is not None else "Unavailable", delta=order_delta)
     m4.metric("Avg Line Value", currency(overview.get("average_line_value")))
 
     if len(monthly_trend) >= 2:
         st.caption(f"Totals cover all records. Changes compare {current_m['year_month']} with {previous_m['year_month']}.")
 
+    with st.expander("Revenue breakdown"):
+        st.write(f"Gross sales: {currency(overview.get('total_sales_amount'), curr_sym)}")
+        st.write(f"Recorded discounts: {currency(overview.get('discounts'), curr_sym)}")
+        st.write(f"Net revenue: {currency(overview.get('total_revenue'), curr_sym)}")
+    if overview.get("coverage"):
+        st.subheader("Revenue coverage by currency")
+        st.dataframe(overview["coverage"], hide_index=True)
+        st.caption("Received includes all rows. Net revenue includes completed, paid and fulfilled sales. UNKNOWN means no currency was supplied.")
     # Monthly trend and category breakdown
     left, right = st.columns([3, 2])
 
@@ -97,7 +105,7 @@ if ensure_demo_data():
         if monthly_trend:
             trend_sorted = sorted(monthly_trend, key=lambda r: r.get("year_month") or "")
             chart_data = [{"Month": row["year_month"], "Revenue": float(row.get("revenue") or 0)} for row in trend_sorted if row.get("year_month")]
-            st.line_chart(chart_data, x="Month", y="Revenue", color="#E8C978", x_label="Month", y_label=f"Revenue ({curr_sym})")
+            st.line_chart(chart_data, x="Month", y="Revenue", color="#E8C978", x_label="Month", y_label=(f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"))
         else:
             st.info("No monthly data available yet.")
 
@@ -105,7 +113,7 @@ if ensure_demo_data():
         st.subheader("Sales by Category")
         if category_sales:
             cat_data = [{"Category": row.get("category") or "Unspecified", "Revenue": float(row.get("revenue") or 0)} for row in category_sales]
-            st.bar_chart(cat_data, x="Category", y="Revenue", color="#F2E8CD", x_label="Category", y_label=f"Revenue ({curr_sym})", horizontal=True)
+            st.bar_chart(cat_data, x="Category", y="Revenue", color="#F2E8CD", x_label="Category", y_label=(f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"), horizontal=True)
         else:
             st.info("No category data available yet.")
 
@@ -122,7 +130,7 @@ if ensure_demo_data():
             daily[date_k] = daily.get(date_k, 0.0) + float(row.get("revenue") or 0)
         points = [{"Date": str(day), "Revenue": amount} for day, amount in daily.items()]
         if points:
-            st.line_chart(points, x="Date", y="Revenue", color="#E8C978", x_label="Date", y_label=f"Revenue ({curr_sym})")
+            st.line_chart(points, x="Date", y="Revenue", color="#E8C978", x_label="Date", y_label=(f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"))
 
         else:
             st.info("No daily revenue available yet.")
@@ -132,5 +140,5 @@ if ensure_demo_data():
         st.dataframe(
             top_products, use_container_width=True, hide_index=True,
             column_config={"product_name": "Product", "category": "Category",
-                           "revenue": f"Revenue ({curr_sym})", "units_sold": "Units sold"},
+                           "revenue": (f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"), "units_sold": "Units sold"},
         )

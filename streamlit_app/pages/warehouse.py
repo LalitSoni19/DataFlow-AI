@@ -18,6 +18,9 @@ for _parent in [_current, *_current.parents]:
             sys.path.insert(0, str(_parent))
         break
 
+import csv
+import io
+
 import streamlit as st
 
 from dataflow_ai.utils import mask_record_pii
@@ -45,14 +48,23 @@ if ensure_demo_data():
     has_customer_fields = any(term in selected.lower() for term in ("customer", "upload", "flex"))
     rows = [mask_record_pii(r) for r in raw_rows] if has_customer_fields else raw_rows
     st.dataframe(rows, use_container_width=True, hide_index=True)
-    csv_text = "".join(
-        (",".join(str(value) for value in row.values()) + "\n") for row in rows
-    )
+    buffer = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    csv_text = buffer.getvalue()
     st.download_button("Download displayed rows as CSV", csv_text, file_name=f"{selected.replace('.', '_')}.csv", mime="text/csv")
 
     st.divider()
 
     # Customer privacy and data erasure controls
+    from streamlit_app.components import base_settings
+    subject, role = "demo", "admin"
+    if base_settings().auth_required or base_settings().is_production:
+        subject, role = st.user["sub"], st.user.get("dataflow_role", "analyst")
+        if st.user.get("dataflow_role") not in ("admin", "dpo"):
+            st.stop()
     with st.expander("🛡️ Customer Privacy & Right to Erasure (GDPR)", expanded=False):
         st.markdown(
             "Execute atomic customer personal data anonymization in accordance with GDPR Article 17. "
@@ -71,7 +83,7 @@ if ensure_demo_data():
             anonymize_clicked = action_col2.button("Anonymize Data", type="primary")
 
         if check_clicked and target_customer_id.strip():
-            status = repository.get_customer_privacy_status(target_customer_id.strip())
+            status = repository.authorized_customer_action(target_customer_id.strip(), subject, role)
             if status:
                 st.json(status)
                 if status["is_anonymized"]:
@@ -86,7 +98,7 @@ if ensure_demo_data():
                 st.warning("⚠️ Please check the authorization confirmation box before executing permanent anonymization.")
             else:
                 try:
-                    receipt = repository.delete_or_anonymize_customer(target_customer_id.strip())
+                    receipt = repository.authorized_customer_action(target_customer_id.strip(), subject, role, erase=True)
                     st.success(receipt["message"])
                     st.json(receipt)
                     st.cache_data.clear()

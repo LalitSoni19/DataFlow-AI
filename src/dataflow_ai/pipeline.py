@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import tempfile
+import shutil
 import time
 import uuid
 from datetime import datetime, timezone
@@ -22,7 +24,7 @@ from dataflow_ai.models import DatasetQualityResult, PipelineRunSummary
 from dataflow_ai.processing import clean_records, validate_source_records
 from dataflow_ai.sample_data import generate_sample_data
 from dataflow_ai.settings import Settings
-from dataflow_ai.utils import atomic_write_json, sanitize_secret_string, write_json_lines
+from dataflow_ai.utils import atomic_write_json, sanitize_secret_string, sha256_file, write_json_lines
 from dataflow_ai.warehouse.repository import WarehouseRepository
 
 LOGGER = logging.getLogger(__name__)
@@ -42,6 +44,21 @@ class PipelineRunner:
         if regenerate_sample or not (self.settings.sample_dir / "customers.csv").exists():
             generate_sample_data(self.settings.sample_dir)
         return self.run_from_sources(self.settings.sample_dir)
+
+    def restore_run(self, run_id: str) -> PipelineRunSummary:
+        """Republish verified immutable receipts as a new run in this workspace."""
+        run_id = str(uuid.UUID(run_id))
+        manifest = self.settings.processed_dir / f"run-{run_id}.json"
+        summary = json.loads(manifest.read_text(encoding="utf8"))
+        if summary.get("status") != "completed" or summary.get("run_id") != run_id:
+            raise ValueError("Only completed imports can be restored.")
+        with tempfile.TemporaryDirectory() as tmp:
+            for asset in summary["receipts"]:
+                path = Path(asset["storage_path"]).resolve()
+                if not path.is_relative_to(self.settings.raw_dir.resolve()) or sha256_file(path) != asset["sha256"]:
+                    raise ValueError("Archived source failed integrity verification.")
+                shutil.copyfile(path, Path(tmp) / path.name)
+            return self.run_from_sources(Path(tmp))
 
     def run_from_sources(self, source_dir: Path) -> PipelineRunSummary:
         """Ingest, validate, and load files from a source directory into the warehouse."""

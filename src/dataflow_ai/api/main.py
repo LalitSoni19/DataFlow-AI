@@ -151,7 +151,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(analytics_router)
     app.include_router(ai_router)
     app.include_router(privacy_router)
-    app.include_router(auth_router)
+    if not (settings.is_production or settings.auth_required):
+        app.include_router(auth_router)
     app.include_router(payments_router)
     return app
 

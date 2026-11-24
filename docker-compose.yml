@@ -5,13 +5,16 @@ services:
     image: dataflow-ai:latest
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
+    environment: &platform_env
       # Supply the remaining secrets and trusted origins through the host
       # environment, Docker secrets, or your deployment platform. Never bake
       # them into this file or the image.
       DATAFLOW_ENV: ${DATAFLOW_ENV:-production}
       DATAFLOW_JWT_SECRET: ${DATAFLOW_JWT_SECRET:?Set a secure DATAFLOW_JWT_SECRET before deployment}
       DATAFLOW_CORS_ORIGINS: ${DATAFLOW_CORS_ORIGINS:?Set explicit HTTPS dashboard origins}
+      DATAFLOW_OIDC_ISSUER: ${DATAFLOW_OIDC_ISSUER:-}
+      DATAFLOW_OIDC_AUDIENCE: ${DATAFLOW_OIDC_AUDIENCE:-}
+      DATAFLOW_OIDC_JWKS_URL: ${DATAFLOW_OIDC_JWKS_URL:-}
       DATAFLOW_DATABASE_URL: ${DATAFLOW_DATABASE_URL:-}
       MOTHERDUCK_TOKEN: ${MOTHERDUCK_TOKEN:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
@@ -23,6 +26,21 @@ services:
       # artifacts are still operational audit records.
       - dataflow-data:/app/data
       - dataflow-logs:/app/logs
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    image: dataflow-ai:latest
+    command: ["python", "-m", "streamlit", "run", "streamlit_app/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+    environment: *platform_env
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - dataflow-data:/app/data
+      - dataflow-logs:/app/logs
+      - ./.streamlit:/app/.streamlit:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read()"]
     restart: unless-stopped
 
 volumes:

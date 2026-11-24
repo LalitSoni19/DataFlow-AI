@@ -8,12 +8,13 @@ import os
 import threading
 import uuid
 from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import duckdb
+from filelock import FileLock
 
 from dataflow_ai.ingestion.flexible_sales import FlexibleSalesImport
 from dataflow_ai.models import DatasetQualityResult
@@ -25,7 +26,8 @@ LOGGER = logging.getLogger(__name__)
 class WarehouseRepository:
     """Owns the warehouse schema and all parameterized database access."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, currency_code: str | None = None) -> None:
+        self.currency_code = currency_code
         self.settings = settings
         self._cloud_env_configured = False
         self._initialized = False
@@ -61,16 +63,22 @@ class WarehouseRepository:
         # that worker during cleanup.  That made the previous "12 second"
         # timeout capable of hanging indefinitely and retried failed auth with
         # a different configuration.
-        if is_cloud:
-            if self.settings.motherduck_token:
-                config["motherduck_token"] = self.settings.motherduck_token
-            connection = duckdb.connect(dsn, config=config)
-        else:
-            connection = duckdb.connect(dsn, read_only=read_only, config=config)
-        try:
-            yield connection
-        finally:
-            connection.close()
+        # Local DuckDB cannot mix read-only and writer handles, including across
+        # the API and Streamlit processes. The lock is scoped to one workspace.
+        guard = nullcontext() if is_cloud else FileLock(dsn + ".lock", timeout=30)
+        with guard:
+            if is_cloud:
+                if self.settings.motherduck_token:
+                    config["motherduck_token"] = self.settings.motherduck_token
+                connection = duckdb.connect(dsn, config=config)
+            else:
+                connection = duckdb.connect(dsn, read_only=read_only, config=config)
+            try:
+                if self.currency_code:
+                    connection.execute("SET VARIABLE report_currency = ?", [self.currency_code])
+                yield connection
+            finally:
+                connection.close()
 
     def initialize(self) -> None:
         if self._initialized:
@@ -146,6 +154,13 @@ class WarehouseRepository:
                 self._insert_records(connection, "orders", quality_results["orders"].accepted_records)
                 self._insert_records(connection, "order_items", quality_results["order_items"].accepted_records)
                 self._insert_records(connection, "website_events", quality_results["website_events"].accepted_records)
+                connection.execute("""
+                    UPDATE staging.customers SET customer_name='Anonymized User',
+                    email='anonymized_' || replace(lower(customer_id), '-', '_') || '@privacy.local',
+                    city='REDACTED', state='REDACTED', country='REDACTED'
+                    WHERE customer_id IN (SELECT customer_id FROM governance.erased_customers)
+                """)
+                connection.execute("DELETE FROM staging.website_events WHERE customer_id IN (SELECT customer_id FROM governance.erased_customers)")
                 self._build_marts(connection)
                 self._record_quality_results(connection, quality_results, run_id)
                 self._set_active_sales_dataset(connection, mode="curated", run_id=run_id)
@@ -269,7 +284,6 @@ class WarehouseRepository:
         if not records:
             return
         safe_columns = ", ".join(_quote_identifier(column) for column in columns)
-        values = [tuple(record.get(column) for column in columns) for record in records]
         # Registering Arrow batches turns thousands of remote parameterized
         # inserts into a small number of set-based INSERT ... SELECT calls.
         # It is materially faster for MotherDuck and still works locally.  The
@@ -298,8 +312,9 @@ class WarehouseRepository:
 
         placeholders = ", ".join("?" for _ in columns)
         statement = f"INSERT INTO {table} ({safe_columns}) VALUES ({placeholders})"
-        for start in range(0, len(values), 5_000):
-            connection.executemany(statement, values[start : start + 5_000])
+        for start in range(0, len(records), 5_000):
+            values = [tuple(row.get(column) for column in columns) for row in records[start:start + 5_000]]
+            connection.executemany(statement, values)
 
     @staticmethod
     def _set_active_sales_dataset(
@@ -508,7 +523,7 @@ class WarehouseRepository:
             "analytics.monthly_sales",
         }
         if self.active_sales_mode() == "flexible":
-            return {"analytics.flex_sales", "analytics.sales_upload"}
+            return {"analytics.flex_sales_reporting", "analytics.sales_upload"}
         return curated_tables
 
     def active_sales_mode(self) -> str:
@@ -563,7 +578,7 @@ class WarehouseRepository:
                 lines.append(f"Flexible-import semantic mapping: {rendered}")
         curr_code = self.active_currency_code()
         curr_sym = self.active_currency_symbol()
-        lines.append(f"Active dataset currency: {curr_code} ({curr_sym}). All calculations and output values must use this currency without conversion.")
+        lines.append(f"Reporting currency: {curr_code}. For flexible analytics query only analytics.flex_sales_reporting. UNKNOWN means currency was not supplied.")
         return "\n".join(lines)
 
     def flexible_sales_profile(self) -> dict[str, Any] | None:
@@ -592,40 +607,27 @@ class WarehouseRepository:
                 row[key] = {} if key in {"semantic_mapping", "column_types"} else []
         return row
 
-    def active_currency_code(self) -> str:
-        """Return ISO currency code of active data (e.g. 'USD' or 'INR')."""
+    def currency_coverage(self) -> list[dict[str, Any]]:
         self.initialize()
-        if self.active_sales_mode() == "flexible":
-            try:
-                rows = self.fetch_all(
-                    """
-                    SELECT currency, COUNT(*) AS cnt
-                    FROM analytics.flex_sales
-                    WHERE currency IS NOT NULL AND TRIM(currency) != ''
-                    GROUP BY currency
-                    ORDER BY cnt DESC
-                    LIMIT 1
-                    """
-                )
-                if rows and rows[0].get("currency"):
-                    cur = str(rows[0]["currency"]).strip().upper()
-                    if "$" in cur or cur in {"USD", "DOLLAR", "DOLLARS"}:
-                        return "USD"
-                    if "₹" in cur or cur in {"INR", "RS", "RS.", "RUPEE", "RUPEES"}:
-                        return "INR"
-                    if "€" in cur or cur in {"EUR", "EURO", "EUROS"}:
-                        return "EUR"
-                    if "£" in cur or cur in {"GBP", "POUND", "POUNDS"}:
-                        return "GBP"
-                    return cur
-            except Exception:
-                pass
-            return "USD"
-        return "INR"
+        return self.fetch_all("""
+            SELECT currency_code, count(*) AS received, count(revenue) AS with_revenue,
+                   round(100.0 * count(revenue) / count(*), 1) AS revenue_coverage_pct,
+                   count(*) FILTER (WHERE lower(trim(status)) IN ('completed','paid','fulfilled')) AS recognized,
+                   sum(revenue) FILTER (WHERE lower(trim(status)) IN ('completed','paid','fulfilled')) AS net_revenue
+            FROM analytics.flex_sales_classified GROUP BY currency_code ORDER BY currency_code
+        """)
+
+    def active_currency_code(self) -> str:
+        if self.active_sales_mode() != "flexible":
+            return "INR"
+        coverage = self.currency_coverage()
+        return self.currency_code or (coverage[0]["currency_code"] if coverage else "UNKNOWN")
 
     def active_currency_symbol(self) -> str:
         """Return the visual currency symbol ('$' or '₹') without conversion."""
         code = self.active_currency_code()
+        if code == "UNKNOWN":
+            return ""
         if code in {"USD", "$"}:
             return "$"
         if code in {"INR", "₹"}:
@@ -640,20 +642,24 @@ class WarehouseRepository:
         if self.active_sales_mode() == "flexible":
             rows = self.fetch_all(
                 """
-                SELECT COALESCE(SUM(revenue), 0)::DOUBLE AS total_revenue,
-                       COALESCE(SUM(CASE WHEN quantity IS NOT NULL AND unit_price IS NOT NULL THEN (quantity * unit_price) ELSE revenue END), SUM(revenue), 0)::DOUBLE AS total_sales_amount,
-                       COALESCE(NULLIF(COUNT(DISTINCT order_id), 0), COUNT(*))::BIGINT AS total_orders,
-                       COALESCE(NULLIF(COUNT(DISTINCT CASE WHEN customer IS NOT NULL AND customer != 'Unknown' THEN customer END), 0), 1)::BIGINT AS active_customers,
-                       COALESCE(AVG(revenue), 0)::DOUBLE AS average_line_value
-                FROM analytics.flex_sales
+                SELECT SUM(revenue)::DOUBLE AS total_revenue,
+                       CASE WHEN COUNT(quantity * unit_price) = COUNT(*) THEN SUM(quantity * unit_price) END AS total_sales_amount,
+                       CASE WHEN COUNT(discount) = COUNT(*) THEN SUM(discount) END AS discounts,
+                       NULLIF(COUNT(DISTINCT order_id), 0)::BIGINT AS total_orders,
+                       NULLIF(COUNT(DISTINCT NULLIF(customer, 'Unknown')), 0)::BIGINT AS active_customers,
+                       AVG(revenue)::DOUBLE AS average_line_value
+                FROM analytics.flex_sales_reporting
                 """
             )
-            return rows[0]
+            coverage = self.currency_coverage()
+            code = self.currency_code or (coverage[0]["currency_code"] if coverage else "UNKNOWN")
+            return {**rows[0], "currency": code, "coverage": coverage}
         rows = self.fetch_all(
             """
             SELECT
               COALESCE(SUM(net_revenue), 0)::DOUBLE AS total_revenue,
               COALESCE(SUM(gross_revenue), 0)::DOUBLE AS total_sales_amount,
+              COALESCE(SUM(discount_amount), 0)::DOUBLE AS discounts,
               COUNT(DISTINCT order_id)::BIGINT AS total_orders,
               COUNT(DISTINCT customer_id)::BIGINT AS active_customers,
               COALESCE(AVG(net_revenue), 0)::DOUBLE AS average_line_value
@@ -673,13 +679,13 @@ class WarehouseRepository:
                 clauses.append("sales_date < ?")
                 parameters.append(end)
             if region:
-                clauses.append("region = ?")
+                clauses.append("lower(region) = lower(?)")
                 parameters.append(region)
             return self.fetch_all(
                 f"""
                 SELECT sales_date AS date_key, COALESCE(region, 'Unspecified') AS region,
                        SUM(revenue)::DOUBLE AS revenue, COUNT(DISTINCT order_id)::BIGINT AS orders
-                FROM analytics.flex_sales
+                FROM analytics.flex_sales_reporting
                 WHERE {' AND '.join(clauses)}
                 GROUP BY sales_date, COALESCE(region, 'Unspecified')
                 ORDER BY sales_date, region
@@ -695,7 +701,7 @@ class WarehouseRepository:
             clauses.append("date_key < ?")
             parameters.append(end)
         if region:
-            clauses.append("region = ?")
+            clauses.append("lower(region) = lower(?)")
             parameters.append(region)
         return self.fetch_all(
             f"""
@@ -715,7 +721,7 @@ class WarehouseRepository:
                 """
                 SELECT product AS product_name, category, SUM(revenue)::DOUBLE AS revenue,
                        COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
-                FROM analytics.flex_sales
+                FROM analytics.flex_sales_reporting
                 WHERE product IS NOT NULL
                 GROUP BY product, category
                 ORDER BY revenue DESC
@@ -769,8 +775,8 @@ class WarehouseRepository:
                     SELECT STRFTIME(sales_date, '%Y-%m') AS year_month,
                            COALESCE(SUM(revenue), 0)::DOUBLE AS revenue,
                            COUNT(DISTINCT order_id)::BIGINT AS orders,
-                           COUNT(DISTINCT customer)::BIGINT AS customers
-                    FROM analytics.flex_sales
+                           COUNT(DISTINCT NULLIF(customer, 'Unknown'))::BIGINT AS customers
+                    FROM analytics.flex_sales_reporting
                     WHERE sales_date IS NOT NULL
                     GROUP BY 1
                 )
@@ -808,7 +814,7 @@ class WarehouseRepository:
                        COALESCE(SUM(revenue), 0)::DOUBLE AS revenue,
                        COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold,
                        COUNT(DISTINCT order_id)::BIGINT AS orders
-                FROM analytics.flex_sales
+                FROM analytics.flex_sales_reporting
                 GROUP BY COALESCE(category, 'Unspecified')
                 ORDER BY revenue DESC
                 """
@@ -897,9 +903,10 @@ class WarehouseRepository:
         category_growth = []
         for cat in category_data:
             prev_rev = prev_cat_map.get(cat["category"], 0)
-            growth_pct = ((cat["revenue"] - prev_rev) / prev_rev * 100) if prev_rev else 0
-            category_growth.append({**cat, "previous_revenue": prev_rev, "growth_pct": round(growth_pct, 1)})
+            growth_pct = ((cat["revenue"] - prev_rev) / prev_rev * 100) if prev_rev else None
+            category_growth.append({**cat, "previous_revenue": prev_rev, "growth_pct": round(growth_pct, 1) if growth_pct is not None else None})
 
+        fastest = max((r for r in category_growth if r["growth_pct"] is not None), key=lambda r: r["growth_pct"], default={})
         return {
             "year_month": year_month,
             "previous_month": previous_month,
@@ -913,17 +920,17 @@ class WarehouseRepository:
             "revenue_change_pct": round(
                 ((current.get("total_revenue", 0) - previous.get("total_revenue", 0))
                  / previous.get("total_revenue", 1) * 100), 1
-            ) if previous.get("total_revenue") else 0,
+            ) if previous.get("total_revenue") and current.get("total_revenue") is not None else None,
             "customer_change_pct": round(
                 ((current.get("total_customers", 0) - previous.get("total_customers", 0))
                  / previous.get("total_customers", 1) * 100), 1
-            ) if previous.get("total_customers") else 0,
+            ) if previous.get("total_customers") else None,
             "categories": category_growth,
             "regions": region_data,
             "top_region": region_data[0]["region"] if region_data else "N/A",
             "top_region_revenue": region_data[0]["revenue"] if region_data else 0,
-            "highest_growth_category": max(category_growth, key=lambda c: c["growth_pct"])["category"] if category_growth else "N/A",
-            "highest_growth_pct": max(category_growth, key=lambda c: c["growth_pct"])["growth_pct"] if category_growth else 0,
+            "highest_growth_category": fastest.get("category"),
+            "highest_growth_pct": fastest.get("growth_pct"),
         }
 
     @staticmethod
@@ -938,11 +945,11 @@ class WarehouseRepository:
 
         previous_month = self._previous_month(year_month)
         aggregate_sql = """
-            SELECT COALESCE(SUM(revenue), 0)::DOUBLE AS total_revenue,
-                   COUNT(DISTINCT order_id)::BIGINT AS total_orders,
-                   COUNT(DISTINCT customer)::BIGINT AS total_customers,
-                   COALESCE(AVG(revenue), 0)::DOUBLE AS avg_line_value
-            FROM analytics.flex_sales
+            SELECT SUM(revenue)::DOUBLE AS total_revenue,
+                   NULLIF(COUNT(DISTINCT order_id), 0)::BIGINT AS total_orders,
+                   NULLIF(COUNT(DISTINCT NULLIF(customer, 'Unknown')), 0)::BIGINT AS total_customers,
+                   AVG(revenue)::DOUBLE AS avg_line_value
+            FROM analytics.flex_sales_reporting
             WHERE STRFTIME(sales_date, '%Y-%m') = ?
         """
         current = self.fetch_all(aggregate_sql, [year_month])[0]
@@ -951,7 +958,7 @@ class WarehouseRepository:
             """
             SELECT COALESCE(category, 'Unspecified') AS category, SUM(revenue)::DOUBLE AS revenue,
                    COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
-            FROM analytics.flex_sales
+            FROM analytics.flex_sales_reporting
             WHERE STRFTIME(sales_date, '%Y-%m') = ?
             GROUP BY COALESCE(category, 'Unspecified')
             ORDER BY revenue DESC
@@ -961,7 +968,7 @@ class WarehouseRepository:
         previous_categories = self.fetch_all(
             """
             SELECT COALESCE(category, 'Unspecified') AS category, SUM(revenue)::DOUBLE AS revenue
-            FROM analytics.flex_sales
+            FROM analytics.flex_sales_reporting
             WHERE STRFTIME(sales_date, '%Y-%m') = ?
             GROUP BY COALESCE(category, 'Unspecified')
             """,
@@ -971,7 +978,7 @@ class WarehouseRepository:
             """
             SELECT COALESCE(region, 'Unspecified') AS region, SUM(revenue)::DOUBLE AS revenue,
                    COUNT(DISTINCT order_id)::BIGINT AS orders
-            FROM analytics.flex_sales
+            FROM analytics.flex_sales_reporting
             WHERE STRFTIME(sales_date, '%Y-%m') = ?
             GROUP BY COALESCE(region, 'Unspecified')
             ORDER BY revenue DESC
@@ -983,8 +990,9 @@ class WarehouseRepository:
         for category in category_data:
             current_revenue = float(category["revenue"] or 0)
             previous_revenue = previous_map.get(category["category"], 0.0)
-            growth = ((current_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue else 0.0
-            categories.append({**category, "previous_revenue": previous_revenue, "growth_pct": round(growth, 1)})
+            growth = ((current_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue else None
+            categories.append({**category, "previous_revenue": previous_revenue, "growth_pct": round(growth, 1) if growth is not None else None})
+        fastest = max((r for r in categories if r["growth_pct"] is not None), key=lambda r: r["growth_pct"], default={})
         return {
             "year_month": year_month,
             "previous_month": previous_month,
@@ -999,18 +1007,18 @@ class WarehouseRepository:
                 ((float(current["total_revenue"] or 0) - float(previous["total_revenue"] or 0)) /
                  float(previous["total_revenue"]) * 100),
                 1,
-            ) if previous["total_revenue"] else 0,
+            ) if previous["total_revenue"] and current["total_revenue"] is not None else None,
             "customer_change_pct": round(
                 ((float(current["total_customers"] or 0) - float(previous["total_customers"] or 0)) /
                  float(previous["total_customers"]) * 100),
                 1,
-            ) if previous["total_customers"] else 0,
+            ) if previous["total_customers"] and current["total_customers"] is not None else None,
             "categories": categories,
             "regions": regions,
             "top_region": regions[0]["region"] if regions else "N/A",
             "top_region_revenue": regions[0]["revenue"] if regions else 0,
-            "highest_growth_category": max(categories, key=lambda item: item["growth_pct"])["category"] if categories else "N/A",
-            "highest_growth_pct": max(categories, key=lambda item: item["growth_pct"])["growth_pct"] if categories else 0,
+            "highest_growth_category": fastest.get("category"),
+            "highest_growth_pct": fastest.get("growth_pct"),
         }
 
     def available_months(self) -> list[str]:
@@ -1022,7 +1030,7 @@ class WarehouseRepository:
                 for row in self.fetch_all(
                     """
                     SELECT DISTINCT STRFTIME(sales_date, '%Y-%m') AS year_month
-                    FROM analytics.flex_sales
+                    FROM analytics.flex_sales_reporting
                     WHERE sales_date IS NOT NULL
                     ORDER BY year_month DESC
                     """
@@ -1040,16 +1048,19 @@ class WarehouseRepository:
         ]
 
     def table_metadata(self) -> list[dict[str, str]]:
-        return [
+        tables = [
             {"table": "analytics.fact_sales", "description": "Completed order lines with revenue, cost, and profit measures."},
             {"table": "analytics.dim_customer", "description": "Customer profile and geography dimension."},
             {"table": "analytics.dim_product", "description": "Product catalogue and category dimension."},
             {"table": "analytics.dim_date", "description": "Calendar dimension for daily, monthly, and quarterly analysis."},
             {"table": "analytics.dim_region", "description": "Sales-region dimension."},
             {"table": "analytics.monthly_sales", "description": "Monthly sales aggregate by region."},
-            {"table": "analytics.flex_sales", "description": "Canonical fact rows inferred from the active flexible sales import."},
+            {"table": "analytics.flex_sales_reporting", "description": "Canonical fact rows inferred from the active flexible sales import."},
             {"table": "analytics.sales_upload", "description": "Source-shaped active sales upload with dynamically profiled columns."},
         ]
+
+        allowed = self.ai_allowed_tables()
+        return [item for item in tables if item["table"] in allowed]
 
     def audit_ai_query(
         self,
@@ -1081,6 +1092,13 @@ class WarehouseRepository:
                 ],
             )
         return request_id
+
+    def authorized_customer_action(self, customer_id: str, subject: str, role: str, *, erase: bool = False):
+        if role not in {"admin", "dpo"} and customer_id != subject:
+            raise PermissionError("This role cannot manage another customer's record.")
+        if erase:
+            return self.delete_or_anonymize_customer(customer_id)
+        return self.get_customer_privacy_status(customer_id)
 
     def get_customer_privacy_status(self, customer_id: str) -> dict[str, Any] | None:
         """Query privacy status of a customer record in staging and dimensional marts."""
@@ -1121,6 +1139,7 @@ class WarehouseRepository:
         with self.connection() as connection:
             connection.execute("BEGIN TRANSACTION")
             try:
+                connection.execute("INSERT OR IGNORE INTO governance.erased_customers VALUES (?)", [customer_id])
                 # 1. Anonymize personal info in staging.customers
                 connection.execute(
                     """

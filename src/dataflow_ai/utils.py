@@ -160,6 +160,8 @@ def mask_record_pii(record: dict[str, Any], *, mask_names: bool = False) -> dict
         low_key = key.lower()
         # provide readable defaults for empty / null values
         if value is None or (isinstance(value, str) and value.strip().lower() in {"", "null", "none", "nan"}):
+            if low_key in {"active_customers", "total_customers", "customers"}:
+                continue
             if any(term in low_key for term in ("customer", "client", "buyer", "user", "name")):
                 masked[key] = "Unknown"
             elif any(term in low_key for term in ("region", "category", "subcategory", "city", "state", "country")):

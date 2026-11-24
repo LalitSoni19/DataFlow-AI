@@ -22,6 +22,12 @@ Setting up modern data stacks often requires stitching together heavy cloud serv
 
 ---
 
+## Sales workflow
+
+[Watch the local upload-to-answer demo](docs/demo/sales-workflow.gif) or [view the sales dashboard](docs/demo/sales-overview.png). The three-row example recognizes two completed or paid sales totaling $235 and excludes a $15 refund.
+
+The public dashboard provides a temporary, isolated demo workspace per browser session. For persistent customer workspaces and sign-in, follow the [deployment instructions](docs/runbook.md#customer-workspaces).
+
 ## Architecture
 
 ```text
@@ -165,7 +171,7 @@ cp .env.example .env
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Service health status |
-| `GET` | `/api/kpis/overview` | Core KPIs (revenue, orders, active customers, average order value) |
+| `GET` | `/api/kpis/overview` | Core KPIs (revenue, orders, active customers, average line value) |
 | `GET` | `/api/sales` | Daily aggregated sales trends |
 | `GET` | `/api/products/top` | Top-performing products ranked by revenue |
 | `GET` | `/api/pipeline/status` | Last pipeline run execution summary and row counts |

@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/privacy", tags=["privacy"])
 
 
 def _repository(request: Request) -> WarehouseRepository:
-    return request.app.state.repository
+    return WarehouseRepository(getattr(request.state, "workspace_settings", request.app.state.settings))
 
 
 @router.get("/customers/{customer_id}/status")
@@ -28,7 +28,7 @@ def customer_privacy_status(
         )
 
     repository = _repository(request)
-    status = repository.get_customer_privacy_status(customer_id)
+    status = repository.authorized_customer_action(customer_id, current_user.user_id, current_user.role)
     if not status:
         raise HTTPException(status_code=404, detail=f"Customer {customer_id} not found.")
     return status
@@ -49,7 +49,7 @@ def delete_customer_personal_data(
 
     repository = _repository(request)
     try:
-        receipt = repository.delete_or_anonymize_customer(customer_id)
+        receipt = repository.authorized_customer_action(customer_id, current_user.user_id, current_user.role, erase=True)
         return receipt
     except KeyError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error

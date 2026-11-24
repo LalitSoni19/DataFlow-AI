@@ -89,7 +89,7 @@ def dataflow_ai_sales_pipeline():
     def verify_warehouse(summary: dict) -> dict:
         repository = WarehouseRepository(Settings.from_environment())
         overview = repository.kpi_overview()
-        if summary["status"] != "completed" or float(overview["total_revenue"]) <= 0:
+        if summary["status"] != "completed" or "total_revenue" not in overview:
             raise ValueError("Pipeline did not produce a usable analytics warehouse.")
         return {"run_id": summary["run_id"], "total_revenue": overview["total_revenue"]}
 

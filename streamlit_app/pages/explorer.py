@@ -62,9 +62,9 @@ if ensure_demo_data():
     # Quick template queries
     if is_flexible:
         template_options = {
-            "Canonical Sales Fact (flex_sales)": (
+            "Canonical Sales Fact (flex_sales_reporting)": (
                 "SELECT customer, product, category, region, sales_date, revenue, status\n"
-                "FROM flex_sales\n"
+                "FROM flex_sales_reporting\n"
                 "LIMIT 50"
             ),
             "Raw Ingested Data (sales_upload)": (
@@ -72,15 +72,15 @@ if ensure_demo_data():
                 "FROM sales_upload\n"
                 "LIMIT 50"
             ),
-            "Revenue by Category (flex_sales)": (
+            "Revenue by Category (flex_sales_reporting)": (
                 "SELECT category, SUM(revenue) AS total_revenue\n"
-                "FROM flex_sales\n"
+                "FROM flex_sales_reporting\n"
                 "GROUP BY category\n"
                 "ORDER BY total_revenue DESC"
             ),
-            "Top Customers by Spend (flex_sales)": (
+            "Top Customers by Spend (flex_sales_reporting)": (
                 "SELECT customer, SUM(revenue) AS total_spent\n"
-                "FROM flex_sales\n"
+                "FROM flex_sales_reporting\n"
                 "GROUP BY customer\n"
                 "ORDER BY total_spent DESC\n"
                 "LIMIT 20"

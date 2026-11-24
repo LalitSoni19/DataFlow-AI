@@ -25,3 +25,9 @@ Revenue is the sum of `net_revenue` for completed order lines. `net_revenue` is 
 | Order items | `order_item_id` | Unique ID, known order/product, positive quantity and price |
 | Website events | `event_id` | Unique ID, known customer, ISO timestamp |
 
+
+## Flexible sales
+
+Each reporting row represents one sales line or one unique invoice total. The reporting view includes completed, paid and fulfilled records in one currency. Missing currency is a separate UNKNOWN bucket. Net revenue uses an explicit line amount when supplied, or quantity times unit price less the discount. Gross sales and discounts are unavailable if the required inputs are incomplete. Average line value uses measurable lines; average order value requires known order IDs and measurable revenue on every line.
+
+The pipeline's acceptance percentage counts rows loaded. Revenue coverage is the percentage of received rows with a usable revenue measure, by currency. It is displayed alongside recognized row counts. Dates missing from a sales export prevent a monthly breakdown even if the all-time total is measurable.

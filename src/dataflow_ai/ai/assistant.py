@@ -78,7 +78,7 @@ class AnalyticsAssistant:
         self.settings = settings
         self.repository = repository or WarehouseRepository(settings)
         self.retriever = MetadataRetriever.from_project_docs(settings.project_root / "docs")
-        self.executor = SafeSQLExecutor(self.repository)
+        self.executor = SafeSQLExecutor(self.repository, reporting_only=True)
         self.llm = self._configured_llm()
 
     def ask(self, question: str) -> AssistantResponse:
@@ -88,6 +88,23 @@ class AnalyticsAssistant:
 
         sources = self.retriever.search(normalized)
         logged_question = redact_pii_text(normalized)
+        metric = normalized.lower().strip(" ?.")
+        if metric in {"gross sales", "what are gross sales", "total discounts", "average order value", "what is average order value"}:
+            flexible = self.repository.active_sales_mode() == "flexible"
+            table = "analytics.flex_sales_reporting" if flexible else "analytics.fact_sales"
+            net = "revenue" if flexible else "net_revenue"
+            if "gross" in metric:
+                expression = "CASE WHEN COUNT(quantity * unit_price) = COUNT(*) THEN SUM(quantity * unit_price) END"
+                label = "gross_sales"
+            elif "discount" in metric:
+                field = "discount" if flexible else "discount_amount"
+                expression = f"CASE WHEN COUNT({field}) = COUNT(*) THEN SUM({field}) END"
+                label = "discounts"
+            else:
+                expression = f"CASE WHEN COUNT(order_id) = COUNT(*) AND COUNT({net}) = COUNT(*) THEN SUM({net}) / NULLIF(COUNT(DISTINCT order_id),0) END"
+                label = "average_order_value"
+            plan = QueryPlan("business_metric", f"SELECT {expression} AS {label} FROM {table}", [])
+            return self._execute_and_respond(plan, normalized, sources, "local_rules", logged_question)
         warning: str | None = None
 
         # First ask the provider for a typed intent, rather than assuming every
@@ -481,11 +498,11 @@ class AnalyticsAssistant:
         if any(phrase in lower for phrase in ("overview", "kpi", "total sales", "total revenue")):
             return QueryPlan(
                 "overview",
-                """SELECT COALESCE(SUM(revenue), 0)::DOUBLE AS total_revenue,
-                          COUNT(DISTINCT order_id)::BIGINT AS total_orders,
-                          COUNT(DISTINCT customer)::BIGINT AS active_customers,
+                """SELECT SUM(revenue)::DOUBLE AS total_revenue,
+                          NULLIF(COUNT(DISTINCT order_id),0)::BIGINT AS total_orders,
+                          NULLIF(COUNT(DISTINCT NULLIF(customer, 'Unknown')),0)::BIGINT AS active_customers,
                           COALESCE(AVG(revenue), 0)::DOUBLE AS average_line_value
-                   FROM analytics.flex_sales""",
+                   FROM analytics.flex_sales_reporting""",
                 [],
             )
         limit_match = re.search(r"top\s+(\d+)", lower)
@@ -495,7 +512,7 @@ class AnalyticsAssistant:
                 "top_products",
                 """SELECT product AS product_name, category, SUM(revenue)::DOUBLE AS revenue,
                           COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
-                   FROM analytics.flex_sales
+                   FROM analytics.flex_sales_reporting
                    WHERE product IS NOT NULL
                    GROUP BY product, category ORDER BY revenue DESC LIMIT ?""",
                 [limit],
@@ -514,7 +531,7 @@ class AnalyticsAssistant:
                           SUM(CASE WHEN sales_date >= ? AND sales_date < ? THEN revenue ELSE 0 END)::DOUBLE AS previous_revenue,
                           (SUM(CASE WHEN sales_date >= ? AND sales_date < ? THEN revenue ELSE 0 END) -
                            SUM(CASE WHEN sales_date >= ? AND sales_date < ? THEN revenue ELSE 0 END))::DOUBLE AS revenue_change
-                   FROM analytics.flex_sales
+                   FROM analytics.flex_sales_reporting
                    WHERE sales_date >= ? AND sales_date < ?
                    GROUP BY COALESCE(region, 'Unspecified') ORDER BY revenue_change ASC""",
                 [
@@ -528,7 +545,7 @@ class AnalyticsAssistant:
                 "revenue_by_region",
                 """SELECT COALESCE(region, 'Unspecified') AS region, SUM(revenue)::DOUBLE AS revenue,
                           COUNT(DISTINCT order_id)::BIGINT AS orders
-                   FROM analytics.flex_sales
+                   FROM analytics.flex_sales_reporting
                    GROUP BY COALESCE(region, 'Unspecified') ORDER BY revenue DESC""",
                 [],
             )
@@ -540,7 +557,7 @@ class AnalyticsAssistant:
                 """SELECT COALESCE(customer, 'Unknown') AS customer, COALESCE(product, 'Unknown Product') AS product,
                           COALESCE(category, 'Unspecified') AS category, COALESCE(region, 'Unspecified') AS region,
                           sales_date, order_id, revenue, COALESCE(status, 'completed') AS status
-                   FROM analytics.flex_sales
+                   FROM analytics.flex_sales_reporting
                    WHERE LOWER(COALESCE(customer, 'unknown')) = ?
                    LIMIT 25""",
                 [cust_val],
@@ -551,7 +568,7 @@ class AnalyticsAssistant:
             return QueryPlan(
                 "order_records",
                 """SELECT order_id, sales_date, customer, product, category, quantity, unit_price, revenue, status
-                   FROM analytics.flex_sales
+                   FROM analytics.flex_sales_reporting
                    WHERE LOWER(order_id) = ?
                    LIMIT 25""",
                 [ord_val],
@@ -562,11 +579,19 @@ class AnalyticsAssistant:
         if not rows:
             return "The approved warehouse query returned no rows for that question."
         curr_sym = self.repository.active_currency_symbol()
+        if kind == "business_metric":
+            label, amount = next(iter(rows[0].items()))
+            value = "Unavailable" if amount is None else f"{curr_sym}{amount:,.2f}"
+            return f"{label.replace('_', ' ').capitalize()}: {value}."
         if kind == "overview":
             row = rows[0]
+            if row["total_revenue"] is None:
+                return "No recognized rows have a revenue amount in this currency."
+            orders = format(row["total_orders"], ",") if row["total_orders"] is not None else "unavailable"
+            customers = format(row["active_customers"], ",") if row["active_customers"] is not None else "unavailable"
             return (
-                f"Trusted warehouse overview: revenue is {curr_sym}{row['total_revenue']:,.2f} across "
-                f"{row['total_orders']:,} completed orders and {row['active_customers']:,} active customers."
+                f"Trusted warehouse overview: revenue is {curr_sym}{row['total_revenue']:,.2f} · "
+                f"completed orders: {orders}; active customers: {customers}."
             )
         if kind == "top_products":
             first = rows[0]

@@ -43,7 +43,7 @@ SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "revenue": (
         "net_revenue", "net_sales", "sales_amount", "sale_amount", "revenue", "sales",
         "line_total", "total_amount", "grand_total", "amount", "subtotal", "total",
-        "total_sales", "total_price", "order_total", "order_amount", "item_total", "line_amount",
+        "total_sales", "total_price", "invoice_total", "order_total", "order_amount", "item_total", "line_amount",
     ),
     "cost": ("cost_amount", "total_cost", "unit_cost", "cost", "cogs"),
     "profit": ("profit_amount", "gross_profit", "net_profit", "profit", "margin_amount"),
@@ -129,16 +129,30 @@ def load_flexible_sales_files(paths: Iterable[Path]) -> FlexibleSalesImport:
     rows_without_measure = 0
     mapped_columns = set(semantic_mapping.values())
 
+    invoice_ids: set[str] = set()
+    ambiguous_totals: set[tuple[str, float]] = set()
     for source_path, row_number, row in source_rows:
         typed = {column: _coerce_value(row.get(column), column_types[column]) for column in columns}
         typed_rows.append(typed)
         canonical = _canonical_row(
-            typed,
+            row,
             source_file=source_path.name,
             source_row=row_number,
             mapping=semantic_mapping,
             mapped_columns=mapped_columns,
         )
+        amount_column = next((key for key in (semantic_mapping.get("revenue"), *SEMANTIC_ALIASES["revenue"])
+                              if key and not _is_blank(row.get(key))), None)
+        if amount_column in {"order_total", "grand_total", "order_amount", "invoice_total"}:
+            invoice = canonical["order_id"]
+            if not invoice or invoice in invoice_ids:
+                raise SalesImportError("Invoice totals require one row per invoice with a unique order ID. Supply line amounts for item-level exports.")
+            invoice_ids.add(invoice)
+        if amount_column in {"total", "total_amount"} and canonical["order_id"] and canonical["revenue"] is not None:
+            key = (canonical["order_id"], canonical["revenue"])
+            if key in ambiguous_totals:
+                raise SalesImportError("Repeated totals for one invoice are ambiguous. Use line_amount for item amounts or one order_total per invoice.")
+            ambiguous_totals.add(key)
         if canonical["revenue"] is None:
             rows_without_measure += 1
         canonical_rows.append(canonical)
@@ -150,7 +164,7 @@ def load_flexible_sales_files(paths: Iterable[Path]) -> FlexibleSalesImport:
     if "sales_date" not in semantic_mapping:
         warnings.append("No sales date was detected, so time-series questions may not be answerable.")
     if "order_id" not in semantic_mapping:
-        warnings.append("No order or invoice ID was detected; order-count metrics use source rows instead.")
+        warnings.append("No order or invoice ID was detected; order counts are unavailable.")
 
     profile = SalesImportProfile(
         source_files=[path.name for path in source_paths],
@@ -340,16 +354,22 @@ def _validate_sales_signals(mapping: Mapping[str, str], columns: list[str]) -> N
 def _infer_column_types(rows: list[dict[str, Any]], columns: list[str]) -> dict[str, str]:
     types: dict[str, str] = {}
     for column in columns:
-        values = [row.get(column) for row in rows[:2_000] if not _is_blank(row.get(column))]
+        if column.endswith(("_id", "_number")) or column in {*SEMANTIC_ALIASES["order_id"], *SEMANTIC_ALIASES["customer"], *SEMANTIC_ALIASES["product"]}:
+            types[column] = "VARCHAR"
+            continue
+        if any(column in SEMANTIC_ALIASES[field] for field in ("revenue", "unit_price", "discount", "cost", "profit", "quantity")):
+            types[column] = "DOUBLE"
+            continue
+        values = [row.get(column) for row in rows if not _is_blank(row.get(column))]
         if not values:
             types[column] = "VARCHAR"
             continue
         parsed_dates = [_parse_date(value) for value in values]
-        if sum(value is not None for value in parsed_dates) / len(values) >= 0.95:
+        if sum(value is not None for value in parsed_dates) / len(values) == 1:
             types[column] = "DATE"
             continue
         parsed_numbers = [_parse_number(value) for value in values]
-        if sum(value is not None for value in parsed_numbers) / len(values) >= 0.95:
+        if sum(value is not None for value in parsed_numbers) / len(values) == 1:
             numeric_values = [value for value in parsed_numbers if value is not None]
             types[column] = "BIGINT" if all(value == value.to_integral_value() for value in numeric_values) else "DOUBLE"
             continue
@@ -421,8 +441,6 @@ def _canonical_row(
             revenue = max((quantity * unit_price) - discount, 0.0)
         elif unit_price is not None:
             revenue = max(unit_price - discount, 0.0)
-    elif quantity is None and unit_price is not None and unit_price > 0:
-        quantity = max(round(revenue / unit_price, 2), 1.0)
 
     # Detect currency from column, or fallback to currency symbols in raw measures
     currency_val = text("currency")
@@ -460,7 +478,7 @@ def _canonical_row(
         "net_revenue": revenue,
         "cost": number("cost"),
         "profit": number("profit"),
-        "status": text("status") or "completed",
+        "status": text("status") or ("unknown" if "status" in mapping else "completed"),
         "currency": currency_val,
         "attributes_json": json.dumps(attributes, ensure_ascii=False, default=str) if attributes else None,
     }
@@ -487,7 +505,8 @@ def _parse_number(value: Any) -> Decimal | None:
         return None
     if isinstance(value, (int, float, Decimal)):
         try:
-            return Decimal(str(value))
+            number = Decimal(str(value))
+            return number if number.is_finite() else None
         except InvalidOperation:
             return None
     text = str(value).strip()
@@ -507,12 +526,18 @@ def _parse_number(value: Any) -> Decimal | None:
     # Remove currency tokens and symbols from text so "Rs. 5000" does not leave an unwanted dot
     clean_text = re.sub(r"(?i)\b(usd|inr|eur|gbp|cad|aud|rs\.?|rupees?|dollars?)\b\.?", "", text)
     clean_text = re.sub(r"[\s₹$€£¥]", "", clean_text)
-    clean_text = re.sub(r"[^0-9,.-]", "", clean_text).replace(",", "")
+    if "," in clean_text:
+        if re.fullmatch(r"-?(?:\d+|\d{1,3}(?:\.\d{3})+),\d{1,2}", clean_text):
+            clean_text = clean_text.replace(".", "").replace(",", ".")
+        elif re.fullmatch(r"-?\d{1,3}(?:,\d{3})+(?:\.\d+)?", clean_text) or re.fullmatch(r"-?\d{1,2}(?:,\d{2})+,\d{3}(?:\.\d+)?", clean_text):
+            clean_text = clean_text.replace(",", "")
+        else:
+            return None
     if not clean_text or clean_text in {"-", ".", "-."}:
         return None
     try:
         number = Decimal(clean_text)
-        return -number if negative else number
+        return (-number if negative else number) if number.is_finite() else None
     except InvalidOperation:
         return None
 

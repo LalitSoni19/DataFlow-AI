@@ -169,16 +169,16 @@ Classify the user's request into exactly one intent:
 
 For warehouse_query, produce one DuckDB SELECT query. It may use CTEs, but it
 must use only tables and columns listed in the live catalog, qualify tables with
-the analytics schema (e.g. analytics.sales_upload, analytics.flex_sales, analytics.fact_sales),
+the analytics schema (e.g. analytics.flex_sales_reporting, analytics.fact_sales),
 use explicit JOIN conditions (e.g. JOIN b ON a.id = b.id; when comparing two scalar/1-row CTEs,
 use JOIN other_cte ON 1=1; never use comma joins like FROM a, b), contain no comments
 or semicolons, and never use external-file functions.
 
 === REVENUE & CALCULATION RULES ===
 - Respect the active currency of the data (dollars $ or rupees ₹). NEVER convert currencies.
-- Net revenue / revenue: in analytics.fact_sales use SUM(net_revenue); in analytics.flex_sales use SUM(revenue).
-- Total sales amount / gross sales: in analytics.fact_sales use SUM(gross_revenue); in analytics.flex_sales use SUM(CASE WHEN quantity IS NOT NULL AND unit_price IS NOT NULL THEN (quantity * unit_price) ELSE revenue END) or SUM(revenue).
-- Average order/line value: AVG(net_revenue) or AVG(revenue).
+- Net revenue / revenue: in analytics.fact_sales use SUM(net_revenue); in analytics.flex_sales_reporting use SUM(revenue).
+- Total sales amount / gross sales: in analytics.fact_sales use SUM(gross_revenue); in analytics.flex_sales_reporting return gross sales only when every recognized line has quantity and unit_price.
+- Average line value is AVG(line revenue). Average order value is total order revenue divided by distinct orders; require known order IDs.
 - Exclude cancelled/refunded/returned orders when calculating completed revenue if status is present.
 
 === NULL HANDLING & RECORD RULES ===

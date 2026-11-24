@@ -28,6 +28,7 @@ DEFAULT_ALLOWED_TABLES = {
     "analytics.dim_region",
     "analytics.monthly_sales",
     "analytics.flex_sales",
+    "analytics.flex_sales_reporting",
     "analytics.sales_upload",
 }
 EXTERNAL_SCAN_TOKENS = re.compile(
@@ -179,7 +180,10 @@ class SafeSQLExecutor:
         repository: WarehouseRepository,
         maximum_rows: int = 200,
         timeout_seconds: float | None = None,
+        *,
+        reporting_only: bool = False,
     ) -> None:
+        self.reporting_only = reporting_only
         self.repository = repository
         self.maximum_rows = maximum_rows
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else getattr(
@@ -194,9 +198,11 @@ class SafeSQLExecutor:
         mask_pii: bool = True,
     ) -> SQLExecutionResult:
         repo_tables = set(self.repository.ai_allowed_tables()) if hasattr(self.repository, "ai_allowed_tables") else set()
+        if self.reporting_only:
+            repo_tables.discard("analytics.sales_upload")
         safe_sql = validate_read_only_sql(
             sql,
-            allowed_tables=repo_tables | DEFAULT_ALLOWED_TABLES,
+            allowed_tables=repo_tables or DEFAULT_ALLOWED_TABLES,
             maximum_limit=self.maximum_rows,
         )
         values = parameters or []

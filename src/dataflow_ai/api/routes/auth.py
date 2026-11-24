@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -90,6 +91,28 @@ _USER_REGISTRY: dict[str, dict[str, Any]] = {
 }
 
 
+@lru_cache(maxsize=4)
+def _key_client(url: str):
+    from jwt import PyJWKClient
+    return PyJWKClient(url, timeout=5)
+
+
+def _provider_session(token: str, settings) -> UserSession:
+    import jwt
+
+    if not (settings.oidc_issuer and settings.oidc_audience and
+            (settings.oidc_jwks_url or "").startswith("https://")):
+        raise HTTPException(503, "Configure the workspace identity provider.")
+    try:
+        key = _key_client(settings.oidc_jwks_url).get_signing_key_from_jwt(token)
+        claims = jwt.decode(token, key.key, algorithms=["RS256"], audience=settings.oidc_audience,
+                            issuer=settings.oidc_issuer, options={"require": ["exp", "sub", "iss", "aud"]})
+    except jwt.PyJWTError as error:
+        raise HTTPException(401, "Identity provider token verification failed.") from error
+    role = claims.get("dataflow_role", "analyst")
+    return UserSession(claims["sub"], role, claims.get("jti", ""), claims["exp"])
+
+
 def get_current_user(request: Request) -> UserSession:
     """Extract and verify JWT bearer token from Authorization header."""
     auth_header = request.headers.get("Authorization")
@@ -103,6 +126,10 @@ def get_current_user(request: Request) -> UserSession:
         if len(parts) != 2 or parts[0].lower() != "bearer":
             raise HTTPException(status_code=401, detail="Invalid Authorization header. Must use 'Bearer <token>'.")
         token = parts[1].strip()
+        if is_production or auth_required:
+            session = _provider_session(token, settings)
+            request.state.workspace_settings = settings.workspace(settings.oidc_issuer, session.user_id)
+            return session
         try:
             payload = verify_jwt(token, secret=jwt_secret)
             return UserSession(

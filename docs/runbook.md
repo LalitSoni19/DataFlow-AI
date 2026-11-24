@@ -26,3 +26,19 @@ The raw lake is append-only. Correct the source snapshot, rerun the pipeline, an
 - Use one Airflow run at a time for a shared warehouse. Set `DATAFLOW_SOURCE_DIR` to the persisted directory that receives scheduled source snapshots.
 - Monitor `/health`, `/api/pipeline/status`, LLM-provider error warnings, and the AI audit log. A slow query should terminate at `AI_QUERY_TIMEOUT_SECONDS`; an LLM call is bounded by `LLM_TIMEOUT_SECONDS` and `LLM_MAX_RETRIES`.
 
+
+## Customer workspaces
+
+The public Streamlit demo uses a temporary directory per session. Reconnecting can start a fresh demo. For customer use, set DATAFLOW_AUTH_REQUIRED=true or DATAFLOW_ENV=production, mount persistent storage at DATAFLOW_DATA_DIR, and configure your identity provider. For multiple server processes, point them at the same volume with functioning file locks. Multi-host deployments need a shared database and a separately verified concurrency strategy.
+
+- Configure Streamlit's native OIDC sign-in in its auth secrets (redirect_uri, cookie_secret, client_id, client_secret, server_metadata_url). Register the dashboard callback ending in /oauth2callback. Supply DATAFLOW_OIDC_ISSUER matching the ID token issuer.
+- For FastAPI set DATAFLOW_OIDC_ISSUER, DATAFLOW_OIDC_AUDIENCE and DATAFLOW_OIDC_JWKS_URL (HTTPS). Supply the required deployment settings in docker-compose.yml. Clients send RS256 access tokens for that audience. Use the same issuer and stable subject across both clients for access to the same workspace. The optional provider-issued dataflow_role claim controls analyst, admin and dpo permissions.
+- In managed mode, provisioning, password recovery, email delivery and account removal belong to the configured identity provider. The local demonstration login/reset routes are disabled. Verify sign-in, recovery delivery and sign-out against your provider before onboarding customers.
+- The dashboard and authenticated API use a separate local DuckDB file, raw files and manifests for each issuer/subject pair. Shared MotherDuck credentials are reserved for explicitly configured single-warehouse pipeline jobs. Use durable per-user storage in production; Streamlit Community Cloud local storage is appropriate for the demo.
+- To initialize an existing customer's workspace from trusted original files, use Settings.from_environment().workspace(issuer, subject) with PipelineRunner. Existing single-warehouse jobs keep their own database. A prior import that lost leading zeros or fractional amounts must be rebuilt from the original source.
+
+## Reviewing and restoring imports
+
+Upload files or fetch a JSON snapshot, inspect its mappings and coverage, then publish. Use one invoice total per invoice, or a distinct line amount per item. Currency is never converted. Select the reporting currency in the dashboard or pass the currency query parameter (e.g. USD) to analytics and AI endpoints. The default is the alphabetically first currency code in the dataset; UNKNOWN groups rows without a currency. The overview also returns all currency subtotals and coverage. Missing status columns assume completed sales; explicit statuses must be completed, paid or fulfilled to contribute.
+
+Import history republishes the immutable source files for a selected completed run as a new run after verifying their hashes. Back up the warehouse and raw/processed directories together. A restore replays the current importer and retains the history of earlier runs.

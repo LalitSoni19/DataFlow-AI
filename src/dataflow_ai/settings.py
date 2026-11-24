@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from hashlib import sha256
 from pathlib import Path
 
 
@@ -107,11 +108,35 @@ class Settings:
     auth_required: bool = False
     stripe_webhook_secret: str | None = None
     razorpay_webhook_secret: str | None = None
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
     google_site_verification: str | None = None
 
     @property
     def is_production(self) -> bool:
         return self.environment.lower() in ("production", "prod")
+
+    def workspace(self, issuer: str, subject: str) -> Settings:
+        """Use one physical local warehouse and raw lake per verified identity."""
+        key = sha256(f"{issuer}\0{subject}".encode()).hexdigest()[:32]
+        return self.with_data_root(self.data_dir / "workspaces" / key)
+
+    def with_data_root(self, root: Path) -> Settings:
+        # Workspace receipts nest dataset, partition and run ID below this root.
+        # Windows extended paths address the same files without the MAX_PATH cap.
+        if os.name == "nt":
+            absolute = root.resolve()
+            windows_path = absolute.as_posix()
+            if not windows_path.startswith("//?/"):
+                if windows_path.startswith("//"):
+                    root = Path("//?/UNC/" + windows_path[2:])
+                else:
+                    root = Path("//?/" + windows_path)
+        return replace(self, data_dir=root, raw_dir=root / "raw", processed_dir=root / "processed",
+                       quarantine_dir=root / "quarantine", sample_dir=root / "sample",
+                       warehouse_dir=root / "warehouse", database_path=root / "warehouse" / "dataflow.duckdb",
+                       temp_dir=root / "temp", logs_dir=root / "logs", database_url=None, motherduck_token=None)
 
     @property
     def has_motherduck_placeholder(self) -> bool:
@@ -226,6 +251,9 @@ class Settings:
             ingestion_api_key=env("INGESTION_API_KEY") or None,
             cors_origins=cors_origins,
             environment=env_str,
+            oidc_issuer=env("DATAFLOW_OIDC_ISSUER"),
+            oidc_audience=env("DATAFLOW_OIDC_AUDIENCE"),
+            oidc_jwks_url=env("DATAFLOW_OIDC_JWKS_URL"),
             debug=debug_bool,
             jwt_secret=jwt_sec,
             auth_required=auth_req,

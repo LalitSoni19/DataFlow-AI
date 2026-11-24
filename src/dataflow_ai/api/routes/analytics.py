@@ -9,16 +9,18 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from dataflow_ai.reports import monthly_report_text
 from dataflow_ai.api.rate_limiter import rate_limit_dependency
 from dataflow_ai.api.routes.auth import UserSession, get_current_user, require_role
 from dataflow_ai.warehouse.repository import WarehouseRepository
 
-router = APIRouter(prefix="/api", tags=["analytics"])
+router = APIRouter(prefix="/api", tags=["analytics"], dependencies=[Depends(get_current_user)])
 CSV_EXPORT_LIMIT = rate_limit_dependency("csv_export", max_requests=5, window_seconds=60)
 
 
 def _repository(request: Request) -> WarehouseRepository:
-    return request.app.state.repository
+    settings = getattr(request.state, "workspace_settings", request.app.state.settings)
+    return WarehouseRepository(settings, currency_code=request.query_params.get("currency"))
 
 
 def _or_unavailable(callback):
@@ -49,7 +51,7 @@ def sales(
         lambda: _repository(request).sales(
             start=start.isoformat() if start else None,
             end=end.isoformat() if end else None,
-            region=region.title() if region else None,
+            region=region,
         )
     )
 
@@ -109,37 +111,5 @@ def monthly_report(
     current_user: UserSession = Depends(require_role("admin", "analyst")),
 ) -> str:
     repository = _repository(request)
-    if repository.active_sales_mode() == "flexible":
-        report_sql = """
-            SELECT COALESCE(region, 'Unspecified') AS region, SUM(revenue)::DOUBLE AS revenue,
-                   COUNT(DISTINCT order_id)::BIGINT AS orders
-            FROM analytics.flex_sales WHERE STRFTIME(sales_date, '%Y-%m') = ?
-            GROUP BY COALESCE(region, 'Unspecified') ORDER BY revenue DESC
-        """
-    else:
-        report_sql = """
-            SELECT region, SUM(net_revenue)::DOUBLE AS revenue, COUNT(DISTINCT order_id)::BIGINT AS orders
-            FROM analytics.fact_sales WHERE STRFTIME(date_key, '%Y-%m') = ?
-            GROUP BY region ORDER BY revenue DESC
-        """
-    rows = _or_unavailable(
-        lambda: repository.fetch_all(
-            report_sql,
-            [month],
-        )
-    )
-    total_revenue = sum(float(row["revenue"]) for row in rows)
-    total_orders = sum(int(row["orders"]) for row in rows)
-    top_region = rows[0]["region"] if rows else "No sales"
-    lines = [
-        "# Monthly Business Report",
-        "",
-        f"Period: {month}",
-        f"Revenue: {total_revenue:,.2f}",
-        f"Completed orders: {total_orders:,}",
-        f"Top region: {top_region}",
-        "",
-        "## Revenue by Region",
-    ]
-    lines.extend(f"- {row['region']}: {row['revenue']:,.2f} across {row['orders']:,} orders" for row in rows)
-    return "\n".join(lines) + "\n"
+    summary = _or_unavailable(lambda: repository.monthly_summary(month))
+    return monthly_report_text(summary, repository.active_currency_code())

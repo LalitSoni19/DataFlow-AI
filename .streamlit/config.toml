@@ -8,8 +8,8 @@ font = "sans serif"
 
 [server]
 headless = true
-enableCORS = false
-enableXsrfProtection = false
+enableCORS = true
+enableXsrfProtection = true
 enableStaticServing = true
 
 [browser]

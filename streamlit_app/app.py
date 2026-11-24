@@ -37,4 +37,12 @@ pages = {
 }
 selected_page = st.navigation(pages)
 
+from streamlit_app.components import base_settings, get_settings
+
+get_settings()
+if base_settings().auth_required or base_settings().is_production:
+    if st.sidebar.button("Sign out"):
+        st.logout()
+else:
+    st.sidebar.caption("Private demo session · temporary storage")
 selected_page.run()
