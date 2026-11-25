@@ -179,7 +179,7 @@ class WarehouseRepository:
                 canonical_columns = [
                     "source_file", "source_row", "sales_date", "order_id", "customer",
                     "customer_id", "customer_name", "product", "product_name",
-                    "category", "region", "quantity", "unit_price", "discount",
+                    "category", "region", "quantity", "unit_price", "discount", "gross_revenue",
                     "revenue", "net_revenue", "cost", "profit", "status", "currency",
                     "attributes_json",
                 ]
@@ -545,6 +545,13 @@ class WarehouseRepository:
             if mapping:
                 rendered = ", ".join(f"{target} <- {source}" for target, source in sorted(mapping.items()))
                 lines.append(f"Flexible-import semantic mapping: {rendered}")
+            lines.append(
+                "Flexible sales measures: gross_revenue is quantity × unit_price when available; "
+                "revenue/net_revenue is an explicit net line amount or gross_revenue minus discount; "
+                "cost is an explicit line COGS or quantity × a mapped per-unit cost; "
+                "profit is an explicit line profit or revenue minus cost. Aggregate margin percent as "
+                "100 × SUM(profit) / SUM(revenue). Missing source inputs remain NULL; do not replace them with zero."
+            )
         curr_code = self.active_currency_code()
         curr_sym = self.active_currency_symbol()
         lines.append(f"Reporting currency: {curr_code}. For flexible analytics query only analytics.flex_sales_reporting. UNKNOWN means currency was not supplied.")

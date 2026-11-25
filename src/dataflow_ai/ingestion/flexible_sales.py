@@ -37,14 +37,15 @@ SEMANTIC_ALIASES: dict[str, tuple[str, ...]] = {
     "category": ("product_category", "category", "product_group", "department", "segment"),
     "region": ("sales_region", "region", "territory", "zone", "state", "city", "country"),
     "quantity": ("quantity", "qty", "units_sold", "units", "volume", "item_quantity"),
-    "unit_price": ("unit_price", "selling_price", "sale_price", "price", "rate", "unit_rate"),
-    "discount": ("discount_amount", "discount_value", "discount", "discounts"),
+    "unit_price": ("unit_price", "price_per_unit", "unit_selling_price", "selling_price", "sale_price", "selling_rate", "price", "rate", "unit_rate"),
+    "discount": ("discount_amount", "discount_value", "discounts_amount", "discount", "discounts"),
+    "gross_revenue": ("gross_revenue", "gross_rev", "gross_sales", "gross_amount", "sales_before_discount", "pre_discount_sales"),
     "revenue": (
-        "net_revenue", "net_sales", "sales_amount", "sale_amount", "revenue", "sales",
+        "net_revenue", "net_rev", "net_sales", "net_sales_amount", "sales_amount", "sale_amount", "revenue", "sales",
         "line_total", "total_amount", "grand_total", "amount", "subtotal", "total",
         "total_sales", "total_price", "invoice_total", "order_total", "order_amount", "item_total", "line_amount",
     ),
-    "cost": ("cost_amount", "total_cost", "unit_cost", "cost", "cogs"),
+    "cost": ("cost_amount", "total_cost", "cogs_amount", "cost_of_goods_sold", "cost_of_goods_sold_amount", "cogs", "cost", "unit_cost", "cost_per_unit", "per_unit_cost", "purchase_price", "unit_purchase_price"),
     "profit": ("profit_amount", "gross_profit", "net_profit", "profit", "margin_amount"),
     "status": ("order_status", "sales_status", "payment_status", "status"),
     "currency": ("currency_code", "currency", "currency_symbol", "curr", "curr_code", "cur", "currency_name"),
@@ -356,7 +357,7 @@ def _infer_column_types(rows: list[dict[str, Any]], columns: list[str]) -> dict[
         if column.endswith(("_id", "_number")) or column in {*SEMANTIC_ALIASES["order_id"], *SEMANTIC_ALIASES["customer"], *SEMANTIC_ALIASES["product"]}:
             types[column] = "VARCHAR"
             continue
-        if any(column in SEMANTIC_ALIASES[field] for field in ("revenue", "unit_price", "discount", "cost", "profit", "quantity")):
+        if any(column in SEMANTIC_ALIASES[field] for field in ("gross_revenue", "revenue", "unit_price", "discount", "cost", "profit", "quantity")):
             types[column] = "DOUBLE"
             continue
         values = [row.get(column) for row in rows if not _is_blank(row.get(column))]
@@ -400,8 +401,8 @@ def _canonical_row(
     mapping: Mapping[str, str],
     mapped_columns: set[str],
 ) -> dict[str, Any]:
-    def mapped_value(field: str) -> Any:
-        """Return the primary mapped value or a compatible alias in this row.
+    def mapped_column(field: str) -> str | None:
+        """Find the first populated source column for a semantic field.
 
         A folder can legitimately contain exports from two sales systems.  For
         example, one file may call the measure ``sales_amount`` while another
@@ -418,8 +419,12 @@ def _canonical_row(
         for column in candidates:
             value = row.get(column)
             if not _is_blank(value):
-                return value
+                return column
         return None
+
+    def mapped_value(field: str) -> Any:
+        column = mapped_column(field)
+        return row.get(column) if column else None
 
     def text(field: str) -> str | None:
         value = mapped_value(field)
@@ -434,12 +439,28 @@ def _canonical_row(
     quantity = number("quantity")
     unit_price = number("unit_price")
     discount = number("discount") or 0.0
+    gross_revenue = number("gross_revenue")
+    if gross_revenue is None and quantity is not None and unit_price is not None:
+        gross_revenue = max(quantity * unit_price, 0.0)
     revenue = number("revenue")
     if revenue is None:
-        if quantity is not None and unit_price is not None:
-            revenue = max((quantity * unit_price) - discount, 0.0)
+        if gross_revenue is not None:
+            revenue = max(gross_revenue - discount, 0.0)
         elif unit_price is not None:
-            revenue = max(unit_price - discount, 0.0)
+            revenue = max((quantity or 1.0) * unit_price - discount, 0.0)
+    if gross_revenue is None and revenue is not None:
+        gross_revenue = revenue + discount
+
+    raw_cost = number("cost")
+    cost_column = mapped_column("cost")
+    unit_cost_columns = {"unit_cost", "cost_per_unit", "per_unit_cost", "purchase_price", "unit_purchase_price"}
+    if raw_cost is not None and cost_column in unit_cost_columns:
+        cost = raw_cost * quantity if quantity is not None else None
+    else:
+        cost = raw_cost
+    profit = number("profit")
+    if profit is None and revenue is not None and cost is not None:
+        profit = revenue - cost
 
     currency_val = text("currency")
     if not currency_val:
@@ -472,10 +493,11 @@ def _canonical_row(
         "quantity": quantity,
         "unit_price": unit_price,
         "discount": discount if "discount" in mapping else None,
+        "gross_revenue": gross_revenue,
         "revenue": revenue,
         "net_revenue": revenue,
-        "cost": number("cost"),
-        "profit": number("profit"),
+        "cost": cost,
+        "profit": profit,
         "status": text("status") or ("unknown" if "status" in mapping else "completed"),
         "currency": currency_val,
         "attributes_json": json.dumps(attributes, ensure_ascii=False, default=str) if attributes else None,

@@ -173,6 +173,9 @@ or semicolons, and never use external-file functions.
 - Respect the active currency of the data (dollars $ or rupees ₹). NEVER convert currencies.
 - Net revenue / revenue: in analytics.fact_sales use SUM(net_revenue); in analytics.flex_sales_reporting use SUM(revenue).
 - Total sales amount / gross sales: in analytics.fact_sales use SUM(gross_revenue); in analytics.flex_sales_reporting return gross sales only when every recognized line has quantity and unit_price.
+- For flexible imports, use canonical measures: gross_revenue (pre-discount line sales), discount, revenue (net line sales), cost (extended line COGS), and profit (gross profit). The importer derives these from semantic column mappings when possible.
+- For category or other grouped profit reports, calculate margin percent as 100.0 * SUM(profit) / NULLIF(SUM(revenue), 0). Count orders with COUNT(DISTINCT order_id) and units with SUM(quantity).
+- Do not substitute zero for unavailable cost or profit. If the source lacks enough inputs to calculate a measure, return NULL for it and explain that the source data is missing the required inputs.
 - Average line value is AVG(line revenue). Average order value is total order revenue divided by distinct orders; require known order IDs.
 - Exclude cancelled/refunded/returned orders when calculating completed revenue if status is present.
 

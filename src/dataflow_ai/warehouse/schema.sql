@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS analytics.flex_sales (
     quantity DOUBLE,
     unit_price DOUBLE,
     discount DOUBLE,
+    gross_revenue DOUBLE,
     revenue DOUBLE,
     net_revenue DOUBLE,
     cost DOUBLE,
@@ -110,6 +111,8 @@ CREATE TABLE IF NOT EXISTS analytics.flex_sales (
     currency VARCHAR,
     attributes_json VARCHAR
 );
+
+ALTER TABLE analytics.flex_sales ADD COLUMN IF NOT EXISTS gross_revenue DOUBLE;
 
 CREATE TABLE IF NOT EXISTS governance.sales_imports (
     run_id VARCHAR NOT NULL,
