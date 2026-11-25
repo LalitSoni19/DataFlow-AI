@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import sys
 from pathlib import Path
 
@@ -92,3 +94,9 @@ if ensure_demo_data():
             if response.rows and any(response.rows):
                 st.subheader("Warehouse results")
                 st.dataframe(response.rows, width="stretch", hide_index=True)
+                buffer = io.StringIO()
+                writer = csv.DictWriter(buffer, fieldnames=list(response.rows[0]))
+                writer.writeheader()
+                writer.writerows(response.rows)
+                st.download_button("Download answer as CSV", buffer.getvalue(), file_name="warehouse-answer.csv",
+                                   mime="text/csv", on_click="ignore")

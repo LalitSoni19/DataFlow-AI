@@ -392,17 +392,40 @@ class AnalyticsAssistant:
         """Cover dependable common questions when no provider is reachable."""
 
         lower = question.lower()
-        if self.repository.active_sales_mode() == "flexible":
+        flexible = self.repository.active_sales_mode() == "flexible"
+        # Only claim a total when every requested qualifier is understood.
+        request = re.fullmatch(
+            r"(?:(?:what (?:is|are|was|were)|show(?: me)?|give me)\s+)?(?:the\s+)?"
+            r"(?P<metric>(?:total\s+)?(?:sales|revenue)|(?:kpi\s+)?overview|kpis?)"
+            r"(?P<scope>(?:\s+(?:by region|(?:in|for|during) [a-z]+ 20\d{2})){0,2})[?.!]?",
+            lower.strip(),
+        )
+        if request:
+            scope = request["scope"]
+            period = _question_month(scope)
+            months = re.findall(r"(?:in|for|during) ([a-z]+ 20\d{2})", scope)
+            if months and (len(months) != 1 or period is None):
+                return None
+            table = "analytics.flex_sales_reporting" if flexible else "analytics.fact_sales"
+            revenue = "revenue" if flexible else "net_revenue"
+            date_field = "sales_date" if flexible else "date_key"
+            predicate = f" WHERE {date_field} >= ? AND {date_field} < ?" if period else ""
+            params = list(period[:2]) if period else []
+            if "by region" in scope:
+                return QueryPlan("revenue_by_region",
+                                 f"SELECT region, SUM({revenue})::DOUBLE AS revenue, COUNT(DISTINCT order_id) AS orders "
+                                 f"FROM {table}{predicate} GROUP BY region ORDER BY revenue DESC", params)
+            orders = "COUNT(DISTINCT order_id)"
+            customers = "COUNT(DISTINCT customer_id)"
+            if flexible:
+                orders = f"NULLIF({orders}, 0)"
+                customers = "NULLIF(COUNT(DISTINCT NULLIF(customer, 'Unknown')), 0)"
+            return QueryPlan("overview",
+                             f"SELECT SUM({revenue})::DOUBLE AS total_revenue, {orders} AS total_orders, "
+                             f"{customers} AS active_customers, AVG({revenue}) AS average_line_value "
+                             f"FROM {table}{predicate}", params)
+        if flexible:
             return self._plan_flexible_local_query(lower)
-        if any(phrase in lower for phrase in ("overview", "kpi", "total sales", "total revenue")):
-            return QueryPlan(
-                "overview",
-                """SELECT SUM(net_revenue)::DOUBLE AS total_revenue, COUNT(DISTINCT order_id)::BIGINT AS total_orders,
-                          COUNT(DISTINCT customer_id)::BIGINT AS active_customers,
-                          AVG(net_revenue)::DOUBLE AS average_line_value
-                   FROM analytics.fact_sales""",
-                [],
-            )
         limit_match = re.search(r"top\s+(\d+)", lower)
         if "top" in lower and any(term in lower for term in ("product", "products")):
             limit = min(int(limit_match.group(1)) if limit_match else 5, 25)
@@ -429,13 +452,6 @@ class AnalyticsAssistant:
                    WHERE date_key >= ? AND date_key < ?
                    GROUP BY region ORDER BY revenue_change ASC""",
                 [current_start, next_start, previous_start, current_start, current_start, next_start, previous_start, current_start, previous_start, next_start],
-            )
-        if any(term in lower for term in ("revenue", "sales")) and "region" in lower:
-            return QueryPlan(
-                "revenue_by_region",
-                """SELECT region, SUM(net_revenue)::DOUBLE AS revenue, COUNT(DISTINCT order_id)::BIGINT AS orders
-                   FROM analytics.fact_sales GROUP BY region ORDER BY revenue DESC""",
-                [],
             )
         cust_match = re.search(r"customer\s+(?:id\s*)?(?:=|is|:)?\s*([a-zA-Z0-9_-]+)", lower)
         if cust_match:
@@ -472,23 +488,13 @@ class AnalyticsAssistant:
     def _plan_flexible_local_query(self, lower: str) -> QueryPlan | None:
         profile = self.repository.flexible_sales_profile() or {}
         mapping = profile.get("semantic_mapping", {})
-        if any(phrase in lower for phrase in ("overview", "kpi", "total sales", "total revenue")):
-            return QueryPlan(
-                "overview",
-                """SELECT SUM(revenue)::DOUBLE AS total_revenue,
-                          NULLIF(COUNT(DISTINCT order_id),0)::BIGINT AS total_orders,
-                          NULLIF(COUNT(DISTINCT NULLIF(customer, 'Unknown')),0)::BIGINT AS active_customers,
-                          COALESCE(AVG(revenue), 0)::DOUBLE AS average_line_value
-                   FROM analytics.flex_sales_reporting""",
-                [],
-            )
         limit_match = re.search(r"top\s+(\d+)", lower)
         if "top" in lower and any(term in lower for term in ("product", "products", "item", "items")):
             limit = min(int(limit_match.group(1)) if limit_match else 5, 25)
             return QueryPlan(
                 "top_products",
                 """SELECT product AS product_name, category, SUM(revenue)::DOUBLE AS revenue,
-                          COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
+                          SUM(quantity)::DOUBLE AS units_sold
                    FROM analytics.flex_sales_reporting
                    WHERE product IS NOT NULL
                    GROUP BY product, category ORDER BY revenue DESC LIMIT ?""",
@@ -516,15 +522,6 @@ class AnalyticsAssistant:
                     current_start, next_start, previous_start, current_start,
                     previous_start, next_start,
                 ],
-            )
-        if any(term in lower for term in ("revenue", "sales")) and "region" in lower:
-            return QueryPlan(
-                "revenue_by_region",
-                """SELECT COALESCE(region, 'Unspecified') AS region, SUM(revenue)::DOUBLE AS revenue,
-                          COUNT(DISTINCT order_id)::BIGINT AS orders
-                   FROM analytics.flex_sales_reporting
-                   GROUP BY COALESCE(region, 'Unspecified') ORDER BY revenue DESC""",
-                [],
             )
         cust_match = re.search(r"customer\s+(?:id\s*)?(?:=|is|:)?\s*([a-zA-Z0-9_-]+)", lower)
         if cust_match:

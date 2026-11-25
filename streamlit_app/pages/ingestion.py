@@ -47,7 +47,7 @@ def preview(paths):
         return {"Model": "Curated completed order lines", "Sources": sorted(p.name for p in paths)}
     imported = load_flexible_sales_files(paths)
     rows = imported.canonical_rows
-    return {"Rows": len(rows), "Rows with revenue": sum(row["revenue"] is not None for row in rows),
+    return {"Rows": imported.profile.row_count, "Rejected rows": imported.profile.rejected_row_count, "Rows with revenue": sum(row["revenue"] is not None for row in rows),
             "Currencies": dict(Counter(public_text(row["currency"]) or "Unknown" for row in rows)),
             "Mapping": {field: col for field, col in imported.profile.semantic_mapping.items()
                         if not private_column(col)}, "Mapping warnings": len(imported.profile.warnings)}

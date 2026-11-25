@@ -76,3 +76,46 @@ def test_managed_workspaces_use_disjoint_storage(tmp_path, monkeypatch):
             headers = {"Authorization": f"Bearer {token}"}
             assert client.get("/api/kpis/overview", headers=headers).json()["total_revenue"] == amount
         assert client.post("/api/auth/login").status_code == 404
+
+
+def test_imported_currency_amounts_and_missing_measures(tmp_path):
+    source = tmp_path / "sales.csv"
+    source.write_text(
+        "order_id,date,category,region,qty,unit_price,amount\n"
+        "1,2026-01-01,A,North,,,CAD 1e2\n"
+        "2,2026-02-01,A,South,,35,CAD\n"
+        "3,2026-02-02,B,South,,,CAD 2.0E+1\n"
+        "4,2026-02-01,B,South,,,AUD 10\n"
+        "5,2026-02-02,B,South,,,USD 5\n"
+    )
+    settings = Settings.from_environment(tmp_path)
+    PipelineRunner(settings).run_flexible_sales_files([source])
+    repo = WarehouseRepository(settings, "CAD")
+    assert {r["currency_code"]: r["net_revenue"] for r in repo.currency_coverage()} == {
+        "CAD": 120, "AUD": 10, "USD": 5,
+    }
+    summary = repo.monthly_summary("2026-02")
+    category = next(c for c in summary["categories"] if c["category"] == "A")
+    assert category["revenue"] is None and category["growth_pct"] is None
+    assert category["units_sold"] is None and summary["highest_growth_category"] is None
+
+    assistant = AnalyticsAssistant(settings, repo)
+    assert assistant.ask("What is total revenue in February 2026?").rows[0]["total_revenue"] == 20
+    assert assistant.ask("What is total revenue by region for February 2026?").rows == [
+        {"region": "South", "revenue": 20, "orders": 2}
+    ]
+    assert not assistant.ask("What is total revenue last week?").data_grounded
+
+
+@pytest.mark.parametrize("suffix", ["json", "jsonl"])
+def test_non_object_records_counted_and_quarantined(tmp_path, suffix):
+    import json
+
+    records = [{"order_id": "1", "amount": 10}, None, "invalid", 42]
+    source = tmp_path / f"sales.{suffix}"
+    source.write_text(json.dumps(records) if suffix == "json" else "\n".join(map(json.dumps, records)))
+    settings = Settings.from_environment(tmp_path)
+    result = PipelineRunner(settings).run_flexible_sales_files([source])
+    assert (result.ingested_rows, result.accepted_rows, result.rejected_rows, result.quality_score) == (4, 1, 3, 25)
+    quarantine = settings.quarantine_dir / result.run_id / "flexible_sales.jsonl"
+    assert [json.loads(line)["value"] for line in quarantine.read_text().splitlines()] == records[1:]

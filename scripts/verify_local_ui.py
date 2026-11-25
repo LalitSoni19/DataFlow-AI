@@ -92,6 +92,11 @@ with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
         page.get_by_role("button",name="Ask the warehouse").click()
         page.get_by_role("heading",name="Answer",exact=True).wait_for()
         assert "235" in page.locator("body").inner_text()
+        with page.expect_download() as download:
+            page.get_by_text("Download answer as CSV", exact=True).click()
+        import csv
+        with open(download.value.path(), encoding="utf-8-sig", newline="") as exported:
+            assert float(next(csv.DictReader(exported))["total_revenue"]) == 235
         page.get_by_role("heading",name="Answer",exact=True).scroll_into_view_if_needed()
         capture()
         if frames:

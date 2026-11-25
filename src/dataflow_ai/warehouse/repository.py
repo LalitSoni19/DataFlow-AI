@@ -696,7 +696,7 @@ class WarehouseRepository:
             return self.fetch_all(
                 """
                 SELECT product AS product_name, category, SUM(revenue)::DOUBLE AS revenue,
-                       COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
+                       SUM(quantity)::DOUBLE AS units_sold
                 FROM analytics.flex_sales_reporting
                 WHERE product IS NOT NULL
                 GROUP BY product, category
@@ -788,7 +788,7 @@ class WarehouseRepository:
                 """
                 SELECT COALESCE(category, 'Unspecified') AS category,
                        COALESCE(SUM(revenue), 0)::DOUBLE AS revenue,
-                       COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold,
+                       SUM(quantity)::DOUBLE AS units_sold,
                        COUNT(DISTINCT order_id)::BIGINT AS orders
                 FROM analytics.flex_sales_reporting
                 GROUP BY COALESCE(category, 'Unspecified')
@@ -932,7 +932,7 @@ class WarehouseRepository:
         category_data = self.fetch_all(
             """
             SELECT COALESCE(category, 'Unspecified') AS category, SUM(revenue)::DOUBLE AS revenue,
-                   COALESCE(SUM(quantity), 0)::DOUBLE AS units_sold
+                   SUM(quantity)::DOUBLE AS units_sold
             FROM analytics.flex_sales_reporting
             WHERE STRFTIME(sales_date, '%Y-%m') = ?
             GROUP BY COALESCE(category, 'Unspecified')
@@ -960,12 +960,12 @@ class WarehouseRepository:
             """,
             [year_month],
         )
-        previous_map = {row["category"]: float(row["revenue"] or 0) for row in previous_categories}
+        previous_map = {row["category"]: row["revenue"] for row in previous_categories}
         categories = []
         for category in category_data:
-            current_revenue = float(category["revenue"] or 0)
-            previous_revenue = previous_map.get(category["category"], 0.0)
-            growth = ((current_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue else None
+            current_revenue = category["revenue"]
+            previous_revenue = previous_map.get(category["category"])
+            growth = ((current_revenue - previous_revenue) / previous_revenue * 100) if previous_revenue and current_revenue is not None else None
             categories.append({**category, "previous_revenue": previous_revenue, "growth_pct": round(growth, 1) if growth is not None else None})
         fastest = max((r for r in categories if r["growth_pct"] is not None), key=lambda r: r["growth_pct"], default={})
         return {

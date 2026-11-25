@@ -5,9 +5,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -81,6 +82,7 @@ class FlexibleSalesImport:
     rows: list[dict[str, Any]]
     canonical_rows: list[dict[str, Any]]
     profile: SalesImportProfile
+    rejected_records: list[dict[str, Any]] = field(default_factory=list)
 
 
 def is_supported_sales_file(path: Path) -> bool:
@@ -104,6 +106,7 @@ def load_flexible_sales_files(paths: Iterable[Path]) -> FlexibleSalesImport:
         raise SalesImportError("Unsupported sales file type: " + ", ".join(unsupported))
 
     source_rows: list[tuple[Path, int, dict[str, Any]]] = []
+    rejected_records: list[dict[str, Any]] = []
     source_row_counts: dict[str, int] = {}
     warnings: list[str] = []
     for path in source_paths:
@@ -112,7 +115,12 @@ def load_flexible_sales_files(paths: Iterable[Path]) -> FlexibleSalesImport:
             warnings.append(f"{path.name} contains no data rows and was skipped.")
             continue
         source_row_counts[path.name] = len(rows)
-        for row_number, row in enumerate(rows, start=2):
+        first_row = 1 if path.suffix.lower() in {".json", ".jsonl"} else 2
+        for row_number, row in enumerate(rows, start=first_row):
+            if not isinstance(row, Mapping):
+                rejected_records.append({"source_file": path.name, "record_number": row_number,
+                                         "reason": "Expected a JSON object", "value": row})
+                continue
             source_rows.append((path, row_number, _normalise_record(row)))
 
     if not source_rows:
@@ -169,18 +177,18 @@ def load_flexible_sales_files(paths: Iterable[Path]) -> FlexibleSalesImport:
     profile = SalesImportProfile(
         source_files=[path.name for path in source_paths],
         source_row_counts=source_row_counts,
-        row_count=len(source_rows),
+        row_count=sum(source_row_counts.values()),
         accepted_row_count=len(canonical_rows),
-        rejected_row_count=0,
+        rejected_row_count=len(rejected_records),
         columns=columns,
         column_types=column_types,
         semantic_mapping=semantic_mapping,
         warnings=warnings,
     )
-    return FlexibleSalesImport(rows=typed_rows, canonical_rows=canonical_rows, profile=profile)
+    return FlexibleSalesImport(rows=typed_rows, canonical_rows=canonical_rows, profile=profile, rejected_records=rejected_records)
 
 
-def _read_source_rows(path: Path) -> list[dict[str, Any]]:
+def _read_source_rows(path: Path) -> list[Any]:
     suffix = path.suffix.lower()
     if suffix in {".csv", ".tsv"}:
         return _read_delimited(path, delimiter="\t" if suffix == ".tsv" else None)
@@ -210,7 +218,7 @@ def _read_delimited(path: Path, delimiter: str | None) -> list[dict[str, Any]]:
     return [dict(row) for row in reader if any(value not in (None, "") for value in row.values())]
 
 
-def _read_json(path: Path) -> list[dict[str, Any]]:
+def _read_json(path: Path) -> list[Any]:
     try:
         if path.suffix.lower() == ".jsonl":
             parsed: Any = [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
@@ -219,11 +227,11 @@ def _read_json(path: Path) -> list[dict[str, Any]]:
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise SalesImportError(f"{path.name} is not valid UTF-8 JSON.") from error
     if isinstance(parsed, list):
-        return [dict(item) for item in parsed if isinstance(item, Mapping)]
+        return parsed
     if isinstance(parsed, Mapping):
-        list_values = [value for value in parsed.values() if isinstance(value, list) and all(isinstance(item, Mapping) for item in value)]
+        list_values = [value for value in parsed.values() if isinstance(value, list) and (not value or any(isinstance(item, Mapping) for item in value))]
         if len(list_values) == 1:
-            return [dict(item) for item in list_values[0]]
+            return list_values[0]
         return [dict(parsed)]
     raise SalesImportError(f"{path.name} must contain an object, an array of objects, or JSON Lines.")
 
@@ -443,11 +451,8 @@ def _canonical_row(
     if gross_revenue is None and quantity is not None and unit_price is not None:
         gross_revenue = max(quantity * unit_price, 0.0)
     revenue = number("revenue")
-    if revenue is None:
-        if gross_revenue is not None:
-            revenue = max(gross_revenue - discount, 0.0)
-        elif unit_price is not None:
-            revenue = max((quantity or 1.0) * unit_price - discount, 0.0)
+    if revenue is None and gross_revenue is not None:
+        revenue = max(gross_revenue - discount, 0.0)
     if gross_revenue is None and revenue is not None:
         gross_revenue = revenue + discount
 
@@ -464,8 +469,8 @@ def _canonical_row(
 
     currency_val = text("currency")
     if not currency_val:
-        for field in ("revenue", "unit_price", "price", "amount", "total"):
-            raw_field_val = mapped_value(field) if field in SEMANTIC_ALIASES else row.get(field)
+        for field in ("revenue", "gross_revenue", "unit_price"):
+            raw_field_val = mapped_value(field)
             detected = _detect_currency_symbol(str(raw_field_val or ""))
             if detected:
                 currency_val = detected
@@ -507,6 +512,9 @@ def _canonical_row(
 def _detect_currency_symbol(text: str) -> str | None:
     if not text:
         return None
+    dollar_code = re.search(r"\b(CAD|AUD)\b", text, re.I)
+    if dollar_code:
+        return dollar_code.group().upper()
     if "$" in text or re.search(r"\b(usd|dollars?)\b", text, re.I):
         return "$"
     if "₹" in text or re.search(r"\b(inr|rs\.?|rupees?)\b", text, re.I):
@@ -526,19 +534,12 @@ def _parse_number(value: Any) -> Decimal | None:
     if isinstance(value, (int, float, Decimal)):
         try:
             number = Decimal(str(value))
-            return number if number.is_finite() else None
+            return number if number.is_finite() and math.isfinite(float(number)) else None
         except InvalidOperation:
             return None
     text = str(value).strip()
     negative = text.startswith("(") and text.endswith(")")
     text = text.strip("()")
-    stripped_for_alpha_check = re.sub(
-        r"[\s₹$€£¥(),.%-]|(?i:\b(usd|inr|eur|gbp|cad|aud|rs\.?|rupees?|dollars?)\b\.?)",
-        "",
-        text,
-    )
-    if re.search(r"[a-zA-Z]", stripped_for_alpha_check) and re.search(r"[0-9]", stripped_for_alpha_check):
-        return None
     clean_text = re.sub(r"(?i)\b(usd|inr|eur|gbp|cad|aud|rs\.?|rupees?|dollars?)\b\.?", "", text)
     clean_text = re.sub(r"[\s₹$€£¥]", "", clean_text)
     if "," in clean_text:
@@ -552,7 +553,7 @@ def _parse_number(value: Any) -> Decimal | None:
         return None
     try:
         number = Decimal(clean_text)
-        return (-number if negative else number) if number.is_finite() else None
+        return (-number if negative else number) if number.is_finite() and math.isfinite(float(number)) else None
     except InvalidOperation:
         return None
 

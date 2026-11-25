@@ -227,6 +227,8 @@ class PipelineRunner:
                         row_count=sales_import.profile.source_row_counts.get(path.name, 0),
                     )
                 )
+            if sales_import.rejected_records:
+                write_json_lines(self.settings.quarantine_dir / run_id / "flexible_sales.jsonl", sales_import.rejected_records)
             self._persist_flexible_sales_profile(run_id, sales_import.profile.to_dict())
             self._archive_cloud_sources(receipts)
             self.repository.load_flexible_sales(sales_import, run_id)
