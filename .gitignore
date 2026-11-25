@@ -131,3 +131,6 @@ data/sample/*.json
 Thumbs.db
 ehthumbs.db
 desktop.ini
+
+# --- Local project notes ---
+/PROJECT_STATUS.md
