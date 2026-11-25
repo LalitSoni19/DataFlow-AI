@@ -134,7 +134,7 @@ if ensure_demo_data():
 
             if result.rows and any(result.rows):
                 st.subheader("Results")
-                st.dataframe(result.rows, use_container_width=True, hide_index=True)
+                st.dataframe(result.rows, width="stretch", hide_index=True)
 
                 csv_buffer = io.StringIO()
                 if result.rows and any(result.rows):

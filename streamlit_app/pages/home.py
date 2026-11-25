@@ -136,7 +136,7 @@ if ensure_demo_data():
     with right2.container(border=True):
         st.subheader("Top products")
         st.dataframe(
-            top_products, use_container_width=True, hide_index=True,
+            top_products, width="stretch", hide_index=True,
             column_config={"product_name": "Product", "category": "Category",
                            "revenue": (f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"), "units_sold": "Units sold"},
         )

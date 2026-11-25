@@ -58,7 +58,7 @@ if ensure_demo_data():
     ]
     selected_example = None
     for col, example in zip(example_cols, examples):
-        if col.button(example, use_container_width=True):
+        if col.button(example, width="stretch"):
             selected_example = example
 
     question = st.text_area(
@@ -91,4 +91,4 @@ if ensure_demo_data():
 
             if response.rows and any(response.rows):
                 st.subheader("Warehouse results")
-                st.dataframe(response.rows, use_container_width=True, hide_index=True)
+                st.dataframe(response.rows, width="stretch", hide_index=True)

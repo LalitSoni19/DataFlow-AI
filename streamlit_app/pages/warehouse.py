@@ -45,7 +45,7 @@ if ensure_demo_data():
     has_customer_fields = any(term in selected.lower() for term in ("customer", "upload", "flex"))
     rows = [mask_record_pii(r) for r in raw_rows] if has_customer_fields else raw_rows
     rows = DisplayPolicy(repository).rows(rows, selected.split(".")[-1])
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
     buffer = io.StringIO()
     if rows:
         writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
