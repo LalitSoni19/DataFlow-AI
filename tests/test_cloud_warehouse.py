@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -171,7 +172,8 @@ def test_streamlit_components_get_settings_preserves_cloud(tmp_path: Path) -> No
             assert active_settings.is_cloud_database is True
             assert active_settings.database_url == "md:dataflow_ai"
             assert active_settings.motherduck_token == real_token
-            assert active_settings.effective_database_dsn == "md:dataflow_ai"
+            assert active_settings.cloud_workspace
+            assert active_settings.effective_database_dsn == f"md:{active_settings.cloud_workspace}?attach_mode=single"
 
 
 def test_motherduck_attach_snippet_sanitization(tmp_path: Path) -> None:
@@ -192,9 +194,50 @@ def test_motherduck_attach_snippet_sanitization(tmp_path: Path) -> None:
             connect.assert_not_called()
 
 
+def test_anonymous_sessions_isolate_import_history_and_dashboard(tmp_path, monkeypatch):
+    import duckdb
+    from streamlit.testing.v1 import AppTest
+    from streamlit_app import components
+
+    base = replace(Settings.from_environment(tmp_path), database_url="md:base",
+                   motherduck_token="dummy-test-credential")
+    monkeypatch.setattr(components, "base_settings", lambda: base)
+    # Exercise the cloud routing and SQL locally, with a DuckDB file per cloud database.
+    local_connect = duckdb.connect
+    admin = MagicMock()
+
+    def connect(dsn, *, config):
+        if dsn == base.database_url:
+            return admin
+        assert dsn.startswith("md:df_") and dsn.endswith("?attach_mode=single")
+        database = dsn.removeprefix("md:").partition("?")[0]
+        return local_connect(str(tmp_path / f"{database}.duckdb"))
+
+    monkeypatch.setattr(duckdb, "connect", connect)
+    app = Path(components.__file__).with_name("app.py")
+    first = AppTest.from_file(app, default_timeout=30).run()
+    first.switch_page("pages/ingestion.py").run()
+    first.file_uploader[0].set_value(("sales.csv", b"product,amount,currency\nDesk,123,USD\n", "text/csv")).run()
+    next(b for b in first.button if b.label == "Preview import").click().run()
+    next(b for b in first.button if b.label == "Publish reviewed files").click().run()
+    assert any(s.label == "Completed import" for s in first.selectbox)
+
+    second = AppTest.from_file(app, default_timeout=30).run()
+    assert not second.exception and not second.metric
+    assert any(b.label == "Build Cloud Warehouse (MotherDuck)" for b in second.button)
+    second.switch_page("pages/ingestion.py").run()
+    assert any(i.value == "Published imports will appear here." for i in second.info)
+    assert not any(s.label == "Completed import" for s in second.selectbox)
+
+    first.switch_page("pages/home.py").run()
+    assert not first.exception
+    assert next(m.value for m in first.metric if m.label == "Net revenue") == "$123"
+    provisioned = admin.__enter__.return_value.execute.call_args_list
+    assert len({call.args[0] for call in provisioned}) == 2
+    assert all(call.args[0].startswith('CREATE DATABASE IF NOT EXISTS "df_') for call in provisioned)
+
 
 def test_identity_scopes_keep_cloud_backend(tmp_path):
-    from dataclasses import replace
     base = replace(Settings.from_environment(tmp_path), database_url="md:warehouse",
                    motherduck_token="dummy-test-credential")
     alice = base.workspace("issuer", "alice")

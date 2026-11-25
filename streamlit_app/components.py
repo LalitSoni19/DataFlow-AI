@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 from html import escape
 from tempfile import TemporaryDirectory
 import logging
 import sys
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 _current = Path(__file__).resolve().parent
 PROJECT_ROOT = _current.parent
@@ -59,15 +59,12 @@ def get_settings() -> Settings:
     if "demo_directory" not in st.session_state:
         st.session_state.demo_directory = TemporaryDirectory(prefix="dataflow-demo-")
     scratch = Path(st.session_state.demo_directory.name)
-    if base.is_cloud_database:
-        scoped = base.with_data_root(scratch)
-        return replace(
-            scoped,
-            database_url=base.database_url,
-            motherduck_token=base.motherduck_token,
-            cloud_workspace=base.cloud_workspace,
-        )
-    return base.with_data_root(scratch)
+    scoped = base.with_data_root(scratch)
+    if not base.is_cloud_database:
+        return scoped
+    if "_demo_workspace_id" not in st.session_state:
+        st.session_state["_demo_workspace_id"] = uuid4().hex
+    return base.cloud_scope(scoped, st.session_state["_demo_workspace_id"])
 
 
 def get_repository() -> WarehouseRepository:

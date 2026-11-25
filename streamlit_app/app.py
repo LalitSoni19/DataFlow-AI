@@ -44,7 +44,7 @@ if base_settings().auth_required or base_settings().is_production:
     if st.sidebar.button("Sign out"):
         st.logout()
 elif get_settings().is_cloud_database:
-    st.sidebar.caption("MotherDuck cloud warehouse")
+    st.sidebar.caption("Private session · MotherDuck cloud warehouse")
 else:
     st.sidebar.caption("Private demo session · temporary storage")
 try:
