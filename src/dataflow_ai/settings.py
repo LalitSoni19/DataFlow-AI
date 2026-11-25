@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 
 def _resolve_path(root: Path, raw_value: str) -> Path:
@@ -113,20 +119,15 @@ def _read_streamlit_secrets(project_root: Path | None = None) -> dict[str, str]:
     else:
         search_dirs.extend([Path.cwd(), Path(__file__).resolve().parent.parent.parent])
 
-    try:
-        import tomllib
-
-        for base_dir in search_dirs:
-            candidate = base_dir / ".streamlit" / "secrets.toml"
-            if candidate.is_file():
-                try:
-                    parsed = tomllib.loads(candidate.read_text(encoding="utf-8"))
-                    _flatten(parsed)
-                    break
-                except Exception:
-                    continue
-    except Exception:
-        pass
+    for base_dir in search_dirs:
+        candidate = base_dir / ".streamlit" / "secrets.toml"
+        try:
+            with candidate.open("rb") as stream:
+                parsed = tomllib.load(stream)
+        except (OSError, ValueError):
+            continue
+        _flatten(parsed)
+        break
 
     return values
 
