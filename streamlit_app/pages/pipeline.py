@@ -35,8 +35,8 @@ if ensure_demo_data():
         columns[1].metric("Rows ingested", f"{status['ingested_rows']:,}")
         columns[2].metric("Rows rejected", f"{status['rejected_rows']:,}")
         columns[3].metric("Rows accepted", f"{status['quality_score']:.2f}%")
-        st.caption(f"Run ID: {status['run_id']} · duration: {status['duration_seconds']} seconds")
+        st.caption(f"Duration: {status['duration_seconds']} seconds")
     st.subheader("Dataset quality results")
     st.dataframe(quality, column_config={"quality_score": "Acceptance (%)"}, use_container_width=True, hide_index=True)
-    st.caption("Rejected records are saved as JSON Lines under data/quarantine/<run_id>/ for inspection and remediation.")
+    st.caption("Rejected records are saved as JSON Lines in the quarantine directory for review.")
 

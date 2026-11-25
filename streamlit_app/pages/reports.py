@@ -18,6 +18,7 @@ for _parent in [_current, *_current.parents]:
         break
 
 import streamlit as st
+from streamlit_app.visibility import DisplayPolicy, public_text
 
 try:
     from streamlit_app.components import (
@@ -55,13 +56,13 @@ if ensure_demo_data():
             try:
                 summary = repository.monthly_summary(selected_month)
             except Exception as error:  # noqa: BLE001
-                st.error(f"Failed to generate report: {error}")
+                st.error("The monthly report could not be generated.")
                 st.stop()
 
         from dataflow_ai.reports import monthly_report_text
 
         st.subheader(f"Monthly summary · {selected_month}")
-        code = repository.active_currency_code()
+        code = public_text(repository.active_currency_code())
         cards = st.columns(4)
         cards[0].metric(f"Net revenue ({code})", currency(summary["total_revenue"]),
                         delta=(f"{summary['revenue_change_pct']:+.1f}% vs prior month"
@@ -69,8 +70,8 @@ if ensure_demo_data():
         for card, label, key in zip(cards[1:3], ("Orders", "Customers"), ("total_orders", "total_customers")):
             card.metric(label, "Unavailable" if summary[key] is None else format(summary[key], ","))
         cards[3].metric("Average line value", currency(summary["avg_line_value"]))
-        report = monthly_report_text(summary, code)
+        report = public_text(monthly_report_text(summary, code))
         st.text(report)
         st.subheader("Category performance")
-        st.dataframe(summary["categories"], hide_index=True)
+        st.dataframe(DisplayPolicy(repository).rows(summary["categories"]), hide_index=True)
         st.download_button("Download monthly report", report, file_name=f"sales-{selected_month}.md")

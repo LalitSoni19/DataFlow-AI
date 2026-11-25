@@ -82,7 +82,11 @@ def get_repository() -> WarehouseRepository:
 
 def get_assistant():
     from dataflow_ai.ai.assistant import AnalyticsAssistant
-    return AnalyticsAssistant(get_settings(), get_repository())
+    from streamlit_app.visibility import DisplayPolicy
+    repo = get_repository()
+    assistant = AnalyticsAssistant(get_settings(), repo)
+    assistant.executor.display_policy = DisplayPolicy(repo)
+    return assistant
 
 
 def cached_kpi_overview() -> dict[str, Any]:
@@ -94,7 +98,9 @@ def cached_sales(start: str | None = None, end: str | None = None, region: str |
 
 
 def cached_top_products(limit: int = 10) -> list[dict[str, Any]]:
-    return get_repository().top_products(limit)
+    from streamlit_app.visibility import DisplayPolicy
+    repo = get_repository()
+    return DisplayPolicy(repo).rows(repo.top_products(limit))
 
 
 def cached_monthly_trend(months: int = 6) -> list[dict[str, Any]]:
@@ -134,11 +140,12 @@ def ensure_demo_data() -> bool:
     _show_connection_badge()
 
     if ready:
+        from streamlit_app.visibility import public_text
         repo = get_repository()
         if repo.active_sales_mode() == "flexible":
             codes = [row["currency_code"] for row in repo.currency_coverage()]
             if codes:
-                st.sidebar.selectbox("Reporting currency", codes, key="report_currency")
+                st.sidebar.selectbox("Reporting currency", codes, format_func=public_text, key="report_currency")
         active = repo.fetch_all("SELECT mode, activated_at FROM governance.active_sales_dataset LIMIT 1")
         if active:
             st.sidebar.caption(f"{active[0]['mode'].title()} dataset · Published {active[0]['activated_at']}")
@@ -146,8 +153,7 @@ def ensure_demo_data() -> bool:
 
     settings = get_settings()
     if settings.is_cloud_database:
-        db_name = _display_database_name(settings)
-        st.info(f"☁️ Connected to MotherDuck cloud database **{db_name}**, but analytics tables are not built yet.")
+        st.info("Connected to MotherDuck. Build the warehouse to see analytics.")
         button_label = "Build Cloud Warehouse (MotherDuck)"
     elif settings.has_motherduck_placeholder:
         st.info("No warehouse built yet. Running with local storage until your real MotherDuck token is configured.")
@@ -170,15 +176,14 @@ def _show_connection_badge() -> None:
     settings = get_settings()
     st.sidebar.divider()
     if settings.is_cloud_database:
-        db_name = _display_database_name(settings)
-        st.sidebar.success(f"☁️ MotherDuck: **{db_name}**", icon="☁️")
+        st.sidebar.success("MotherDuck connected", icon="☁️")
         st.sidebar.caption("⚡ Cloud RAM & Cloud Storage Active")
     elif settings.has_motherduck_placeholder:
         st.sidebar.warning("☁️ MotherDuck: Token Pending (`abcdef`)", icon="🔑")
         st.sidebar.caption("👉 Replace `abcdef` in `.env` (line 25) with your real MotherDuck token to activate cloud storage & compute.")
-        st.sidebar.info(f"💾 Local Storage: `{settings.database_path.name}`")
+        st.sidebar.info("Local storage")
     else:
-        st.sidebar.info(f"💾 Local Storage: `{settings.database_path.name}`", icon="💾")
+        st.sidebar.info("Local storage", icon="💾")
 
 
 def currency(value: float | None, symbol: str | None = None) -> str:

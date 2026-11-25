@@ -21,6 +21,7 @@ import csv
 import io
 
 import streamlit as st
+from streamlit_app.visibility import DisplayPolicy
 
 from dataflow_ai.ai.sql_guard import SafeSQLExecutor, SQLSafetyError
 
@@ -33,7 +34,7 @@ page_heading("SQL explorer", "Start with a query template or write a SELECT stat
 
 if ensure_demo_data():
     repository = get_repository()
-    executor = SafeSQLExecutor(repository)
+    policy = DisplayPolicy(repository)
 
     is_flexible = repository.active_sales_mode() == "flexible"
 
@@ -51,6 +52,7 @@ if ensure_demo_data():
                         [tbl_name],
                     )
                 ]
+                cols = [name for name in cols if policy.visible(name, tbl_name)]
                 if cols:
                     st.caption("📌 Columns: " + ", ".join(f"`{c}`" for c in cols))
             except Exception:
@@ -123,24 +125,19 @@ if ensure_demo_data():
     )
 
     if run_clicked and sql_input.strip():
-        executor = SafeSQLExecutor(repository, maximum_rows=row_limit)
+        executor = SafeSQLExecutor(repository, maximum_rows=row_limit, display_policy=policy)
         try:
             with st.spinner("Executing query..."):
                 result = executor.execute(sql_input)
 
             st.success(f"Query returned {result.row_count} row(s) in {result.executed_at}")
 
-            with st.expander("✅ Validated SQL", expanded=False):
-                st.code(result.sql, language="sql")
-                if result.parameters:
-                    st.caption(f"Parameters: {result.parameters}")
-
-            if result.rows:
+            if result.rows and any(result.rows):
                 st.subheader("Results")
                 st.dataframe(result.rows, use_container_width=True, hide_index=True)
 
                 csv_buffer = io.StringIO()
-                if result.rows:
+                if result.rows and any(result.rows):
                     writer = csv.DictWriter(csv_buffer, fieldnames=result.columns)
                     writer.writeheader()
                     writer.writerows(result.rows)
@@ -154,9 +151,9 @@ if ensure_demo_data():
                 st.info("The query returned no rows.")
 
         except SQLSafetyError as error:
-            st.error(f"🛡️ Query blocked by safety guard: {error}")
+            st.error("Choose an approved table and reporting fields.")
         except Exception as error:  # noqa: BLE001
-            st.error(f"Query execution failed: {error}")
+            st.error("The query could not be run. Check the available reporting fields.")
 
     elif run_clicked:
         st.warning("Please enter a SQL query before running.")

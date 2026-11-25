@@ -181,7 +181,9 @@ class SafeSQLExecutor:
         timeout_seconds: float | None = None,
         *,
         reporting_only: bool = False,
+        display_policy=None,
     ) -> None:
+        self.display_policy = display_policy
         self.reporting_only = reporting_only
         self.repository = repository
         self.maximum_rows = maximum_rows
@@ -204,6 +206,8 @@ class SafeSQLExecutor:
             allowed_tables=repo_tables or DEFAULT_ALLOWED_TABLES,
             maximum_limit=self.maximum_rows,
         )
+        if self.display_policy is not None:
+            safe_sql = self.display_policy.prepare_query(safe_sql, self.repository)
         values = parameters or []
         guarded_sql = f"SELECT * FROM ({safe_sql}) AS guarded_query LIMIT {self.maximum_rows}"
         try:
@@ -211,6 +215,8 @@ class SafeSQLExecutor:
         except TimeoutError as error:
             raise SQLSafetyError("The analytical query exceeded its safety time limit.") from error
         rows = [mask_record_pii(r) for r in raw_rows] if mask_pii and raw_rows else raw_rows
+        if self.display_policy is not None:
+            rows = self.display_policy.rows(rows)
         columns = list(rows[0]) if rows else []
         return SQLExecutionResult(
             sql=safe_sql,

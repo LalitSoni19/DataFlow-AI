@@ -572,6 +572,8 @@ class AnalyticsAssistant:
             )
         if kind == "top_products":
             first = rows[0]
+            if not first.get("product_name"):
+                return f"The top product has revenue of {curr_sym}{first['revenue']:,.2f}."
             return f"The top product is {first['product_name']} with revenue of {curr_sym}{first['revenue']:,.2f}."
         if kind == "revenue_by_region":
             return f"Revenue by region ({curr_sym}) is shown below, ordered from highest to lowest trusted warehouse revenue."

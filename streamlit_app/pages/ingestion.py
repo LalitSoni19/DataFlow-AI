@@ -23,7 +23,7 @@ import streamlit as st
 
 from dataflow_ai.ingestion import ApiIngestor, RawDataLake
 from dataflow_ai.pipeline import PipelineRunner
-from dataflow_ai.utils import sanitize_secret_string
+from streamlit_app.visibility import private_column, public_text
 
 try:
     from streamlit_app.components import get_repository, get_settings, page_heading
@@ -48,8 +48,9 @@ def preview(paths):
     imported = load_flexible_sales_files(paths)
     rows = imported.canonical_rows
     return {"Rows": len(rows), "Rows with revenue": sum(row["revenue"] is not None for row in rows),
-            "Currencies": dict(Counter(row["currency"] or "Unknown" for row in rows)),
-            "Mapping": imported.profile.semantic_mapping, "Warnings": imported.profile.warnings}
+            "Currencies": dict(Counter(public_text(row["currency"]) or "Unknown" for row in rows)),
+            "Mapping": {field: col for field, col in imported.profile.semantic_mapping.items()
+                        if not private_column(col)}, "Mapping warnings": len(imported.profile.warnings)}
 
 
 with file_tab:
@@ -80,8 +81,8 @@ with file_tab:
                     result = runner.run_from_sources(Path(temp))
                     st.session_state.pop("file_review", None)
                     st.success(f"Published {result.accepted_rows:,} accepted rows.")
-            except Exception as exc:
-                st.error(sanitize_secret_string(str(exc)))
+            except Exception:
+                st.error("Import failed. Check the source and try again.")
 
 with api_tab:
     api_url = st.text_input("HTTPS JSON endpoint")
@@ -95,8 +96,8 @@ with api_tab:
                 api_url, "api_import", str(uuid.uuid4()), auth_token=api_token or None)
             path = Path(receipt.storage_path)
             st.session_state.api_review = (str(path), preview([path]), api_url)
-        except Exception as exc:
-            st.error(sanitize_secret_string(str(exc)))
+        except Exception:
+            st.error("Import failed. Check the source and try again.")
     reviewed = st.session_state.get("api_review")
     if reviewed and reviewed[2] == api_url:
         st.json(reviewed[1])
@@ -105,18 +106,20 @@ with api_tab:
                 result = runner.run_flexible_sales_files([Path(reviewed[0])])
                 st.session_state.pop("api_review", None)
                 st.success(f"Published {result.accepted_rows:,} accepted rows.")
-            except Exception as exc:
-                st.error(sanitize_secret_string(str(exc)))
+            except Exception:
+                st.error("Import failed. Check the source and try again.")
 
 with history_tab:
     manifests = runner.completed_imports()
     if manifests:
-        selected = st.selectbox("Completed import", manifests)
+        index = st.selectbox("Completed import", range(len(manifests)),
+                             format_func=lambda i: f"Import {len(manifests) - i}" + (" (latest)" if i == 0 else ""))
+        selected = manifests[index]
         if st.button("Restore this import as a new version"):
             try:
                 result = runner.restore_run(selected)
-                st.success(f"Restored as run {result.run_id}.")
-            except Exception as exc:
-                st.error(sanitize_secret_string(str(exc)))
+                st.success(f"Import restored with {result.accepted_rows:,} accepted rows.")
+            except Exception:
+                st.error("Import failed. Check the source and try again.")
     else:
         st.info("Published imports will appear here.")

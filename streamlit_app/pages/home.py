@@ -18,6 +18,7 @@ for _parent in [_current, *_current.parents]:
         break
 
 import streamlit as st
+from streamlit_app.visibility import public_text
 
 try:
     from streamlit_app.components import (
@@ -53,7 +54,7 @@ if ensure_demo_data():
         monthly_trend = cached_monthly_trend(6)
         category_sales = cached_sales_by_category()
     except Exception as error:  # noqa: BLE001
-        st.error(f"Warehouse query failed: {error}")
+        st.error("Sales overview is currently unavailable.")
         st.stop()
 
     revenue_delta = None
@@ -93,7 +94,8 @@ if ensure_demo_data():
         st.write(f"Net revenue: {currency(overview.get('total_revenue'), curr_sym)}")
     if overview.get("coverage"):
         st.subheader("Revenue coverage by currency")
-        st.dataframe(overview["coverage"], hide_index=True)
+        st.dataframe([{**row, "currency_code": public_text(row["currency_code"])}
+                      for row in overview["coverage"]], hide_index=True)
         st.caption("Received includes all rows. Net revenue includes completed, paid and fulfilled sales. UNKNOWN means no currency was supplied.")
     left, right = st.columns([3, 2])
 
@@ -109,7 +111,7 @@ if ensure_demo_data():
     with right.container(border=True):
         st.subheader("Sales by Category")
         if category_sales:
-            cat_data = [{"Category": row.get("category") or "Unspecified", "Revenue": float(row.get("revenue") or 0)} for row in category_sales]
+            cat_data = [{"Category": public_text(row.get("category")) or "Unspecified", "Revenue": float(row.get("revenue") or 0)} for row in category_sales]
             st.bar_chart(cat_data, x="Category", y="Revenue", color="#F2E8CD", x_label="Category", y_label=(f"Revenue ({curr_sym})" if curr_sym else "Revenue (currency unknown)"), horizontal=True)
         else:
             st.info("No category data available yet.")

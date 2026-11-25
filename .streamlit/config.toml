@@ -6,6 +6,9 @@ secondaryBackgroundColor = "#191919"
 textColor = "#FAFAF8"
 font = "sans serif"
 
+[client]
+showErrorDetails = "none"
+
 [server]
 headless = true
 enableCORS = true

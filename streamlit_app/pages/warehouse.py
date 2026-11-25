@@ -23,6 +23,7 @@ import io
 import streamlit as st
 
 from dataflow_ai.utils import mask_record_pii
+from streamlit_app.visibility import DisplayPolicy
 
 try:
     from streamlit_app.components import ensure_demo_data, get_repository, page_heading
@@ -43,6 +44,7 @@ if ensure_demo_data():
     raw_rows = repository.fetch_all(f"SELECT * FROM {selected} LIMIT 100")
     has_customer_fields = any(term in selected.lower() for term in ("customer", "upload", "flex"))
     rows = [mask_record_pii(r) for r in raw_rows] if has_customer_fields else raw_rows
+    rows = DisplayPolicy(repository).rows(rows, selected.split(".")[-1])
     st.dataframe(rows, use_container_width=True, hide_index=True)
     buffer = io.StringIO()
     if rows:
@@ -68,7 +70,7 @@ if ensure_demo_data():
         )
         col1, col2 = st.columns([3, 2])
         with col1:
-            target_customer_id = st.text_input("Customer ID", placeholder="e.g. C-0001", help="Enter the ID of the customer requesting data erasure.")
+            target_customer_id = st.text_input("Customer ID", type="password", help="Enter the ID of the customer requesting data erasure.")
             confirm_erasure = st.checkbox("I confirm authorization to permanently erase this customer's data")
         with col2:
             st.write("")
@@ -80,26 +82,24 @@ if ensure_demo_data():
         if check_clicked and target_customer_id.strip():
             status = repository.authorized_customer_action(target_customer_id.strip(), subject, role)
             if status:
-                st.json(status)
                 if status["is_anonymized"]:
-                    st.info(f"Customer {target_customer_id} has already been anonymized.")
+                    st.info("Customer has already been anonymized.")
                 else:
-                    st.warning(f"Customer {target_customer_id} contains active personal data.")
+                    st.warning("Customer contains active personal data.")
             else:
-                st.error(f"Customer {target_customer_id} not found in warehouse.")
+                st.error("Customer not found in warehouse.")
 
         if anonymize_clicked and target_customer_id.strip():
             if not confirm_erasure:
                 st.warning("⚠️ Please check the authorization confirmation box before executing permanent anonymization.")
             else:
                 try:
-                    receipt = repository.authorized_customer_action(target_customer_id.strip(), subject, role, erase=True)
-                    st.success(receipt["message"])
-                    st.json(receipt)
+                    repository.authorized_customer_action(target_customer_id.strip(), subject, role, erase=True)
+                    st.success("Customer data was anonymized.")
                     st.cache_data.clear()
                 except KeyError as error:
-                    st.error(str(error))
+                    st.error("Customer record unavailable.")
                 except Exception as error:
-                    st.error(f"Failed to anonymize: {error}")
+                    st.error("Customer data could not be anonymized.")
 
 

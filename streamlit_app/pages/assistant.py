@@ -18,6 +18,7 @@ for _parent in [_current, *_current.parents]:
         break
 
 import streamlit as st
+from streamlit_app.visibility import public_text
 
 try:
     from streamlit_app.components import (
@@ -39,10 +40,9 @@ page_heading("Ask your data", "Ask a question about your sales or get guidance o
 if ensure_demo_data():
     settings = get_settings()
     if settings.llm_base_url and settings.llm_api_key:
-        provider_name = settings.llm_model or "LLM"
-        st.success(f"🤖 AI Engine: **{provider_name}** — data questions and sales guidance are available", icon="✅")
+        st.success("Data questions and sales guidance are available.", icon="✅")
     elif settings.ollama_base_url and settings.ollama_model:
-        st.info(f"🤖 AI Engine: Ollama ({settings.ollama_model}) — data questions and sales guidance are available", icon="🔗")
+        st.info("Data questions and sales guidance are available.", icon="🔗")
     else:
         st.warning(
             "⚠️ No LLM configured. Common data questions are available offline; configure a provider to unlock open-ended sales questions and dynamic queries.",
@@ -66,7 +66,7 @@ if ensure_demo_data():
         value=selected_example or "",
         max_chars=1000,
         placeholder="e.g. 'Show monthly revenue by region' or 'How should I qualify enterprise sales leads?'",
-        help="Data questions return an approved SQL trace. General sales guidance is clearly marked as non-data-grounded.",
+        help="Ask for totals, trends, or a breakdown of your sales.",
     )
 
     if st.button("Ask the warehouse", type="primary"):
@@ -77,7 +77,7 @@ if ensure_demo_data():
                 response = get_assistant().ask(question)
 
             st.subheader("Answer")
-            st.write(response.answer)
+            st.write(public_text(response.answer))
 
             if response.data_grounded:
                 st.caption("✓ Data-grounded answer from the active warehouse.")
@@ -87,19 +87,8 @@ if ensure_demo_data():
                 st.info("A focused clarification will help produce a data-grounded result.")
 
             if response.warning:
-                st.warning(response.warning)
+                st.info("Some query details are unavailable.")
 
-            if response.sql:
-                st.subheader("Approved SQL")
-                st.code(response.sql, language="sql")
-                if response.parameters:
-                    st.caption(f"Parameters: {response.parameters}")
-
-            if response.rows:
+            if response.rows and any(response.rows):
                 st.subheader("Warehouse results")
                 st.dataframe(response.rows, use_container_width=True, hide_index=True)
-
-            if response.source_documents:
-                st.caption("Retrieved metadata: " + ", ".join(response.source_documents))
-
-            st.caption(f"Provider: `{response.provider}` | Request ID: `{response.request_id}`")
