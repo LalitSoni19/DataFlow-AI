@@ -1,245 +1,214 @@
+<div align="center">
+
 # DataFlow AI
 
-> A lightweight, local-first data engineering platform and conversational analytics warehouse.
+### From sales exports to traceable analytics.
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://dataflow-ai-lalitsoni.streamlit.app/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![DuckDB](https://img.shields.io/badge/duckdb-warehouse-yellow.svg)](https://duckdb.org/)
-[![FastAPI](https://img.shields.io/badge/fastapi-backend-009688.svg)](https://fastapi.tiangolo.com/)
+Import, validate, explore, and ask questions of your data in one workspace.
 
----
+[![Build](https://github.com/LalitSoni19/DataFlow-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/LalitSoni19/DataFlow-AI/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![DuckDB](https://img.shields.io/badge/Warehouse-DuckDB%20%2F%20MotherDuck-E8C978)
+![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
 
-## Overview
+**[Open the live app](https://dataflow-ai-lalitsoni.streamlit.app/)** · **[Quickstart](#quickstart)** · **[Architecture](#architecture)** · **[Operations guide](docs/runbook.md)**
 
-DataFlow AI is an end-to-end data platform built with **Python**, **DuckDB**, **FastAPI**, and **Streamlit**. 
+</div>
 
-Setting up modern data stacks often requires stitching together heavy cloud services (Snowflake, Databricks, orchestrators) that are expensive and complex to run locally. DataFlow AI packages the entire data lifecycle into a single lightweight repository:
+![DataFlow AI sales dashboard showing revenue, customers, orders, and currency coverage](docs/demo/sales-overview.png)
 
-1. **Ingest & Validate**: Reads messy incoming files (CSV, TSV, Excel, JSON) or REST APIs, validates data contracts, and routes invalid records into quarantine.
-2. **Model & Store**: Transforms raw records into a dimensional star schema inside an embedded DuckDB warehouse (or MotherDuck in the cloud).
-3. **Serve & Visualize**: Exposes metrics through high-performance FastAPI endpoints and an interactive Streamlit dashboard.
-4. **Query with AI**: Allows stakeholders to ask questions in plain English, safely converting questions to sandboxed, read-only SQL with PII masking and offline fallback.
+*Application screenshot from a local run with synthetic sales data. The example recognizes $235 across two completed or paid sales and excludes a $15 refund.*
 
----
+## The workflow
 
-## Sales workflow
+DataFlow AI turns sales files into a queryable warehouse with import history, data-quality checks, dashboards, and an optional natural-language assistant. Python handles ingestion and validation, DuckDB or MotherDuck stores the analytical model, and a shared repository serves Streamlit and FastAPI.
 
-[Watch the local upload-to-answer demo](docs/demo/sales-workflow.gif) or [view the sales dashboard](docs/demo/sales-overview.png). The three-row example recognizes two completed or paid sales totaling $235 and excludes a $15 refund.
+| Step | What you do | What the platform provides |
+| --- | --- | --- |
+| **Import** | Upload CSV, TSV, XLSX, JSON, or JSONL files, or fetch an HTTPS JSON endpoint. | A preview of detected fields, row counts, currencies, and mapping warnings. |
+| **Review & publish** | Confirm the preview and publish the import. | Source receipts, checksums, quality results, and a versioned import history. |
+| **Explore** | Open sales metrics, browse tables, or run analytical SQL. | Revenue trends, product performance, currency coverage, and CSV exports. |
+| **Ask & report** | Ask a sales question or generate a monthly report. | Guarded SQL execution, query results, and downloadable reporting output. |
 
-The public dashboard provides a temporary, isolated demo workspace per browser session. For persistent customer workspaces and sign-in, follow the [deployment instructions](docs/runbook.md#customer-workspaces).
+<details>
+<summary><strong>Watch the upload-to-answer walkthrough</strong></summary>
+
+![Animated demonstration of importing sales data, reviewing analytics, and asking the warehouse a question](docs/demo/sales-workflow.gif)
+
+*Recorded locally using synthetic data.*
+
+</details>
+
+The live demo creates a private workspace for each anonymous browser session. With MotherDuck configured, each session receives a distinct cloud database. Reconnecting can start a new workspace. Persistent access uses authenticated workspaces associated with a verified identity. [Workspace setup](docs/runbook.md#customer-workspaces)
 
 ## Architecture
 
-```text
-       CSV / TSV / Excel / JSON / REST API
-                       │
-                       ▼
-         ┌───────────────────────────┐
-         │       Raw Data Lake       │  (Immutable append-only lake with SHA-256 hashes)
-         └─────────────┬─────────────┘
-                       │
-                       ▼
-         ┌───────────────────────────┐
-         │ Contract & Schema Quality │───► [ Quarantine / Errors ]
-         └─────────────┬─────────────┘
-                       │ Valid rows
-                       ▼
-         ┌───────────────────────────┐
-         │ DuckDB Analytics Database │  (Staging layer, star schema, monthly marts)
-         │  (Local file or MotherDuck)│
-         └─────────────┬─────────────┘
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-      [ FastAPI Backend ]  [ Streamlit UI ]
-              ▲
-              │
-      [ AI Sales Assistant ] (Sandboxed Text-to-SQL + PII Redaction)
+```mermaid
+flowchart TB
+    files["Sales files / curated source batches"] --> pipeline
+    api["HTTPS JSON snapshots"] --> pipeline
+    subgraph pipeline["Python ingestion and processing"]
+        raw["Source receipts and SHA-256 checksums"]
+        validation["Contract validation / sales field mapping"]
+        quarantine["Rejected rows and quality artifacts"]
+        raw --> validation
+        validation --> quarantine
+    end
+    validation --> warehouse["Workspace warehouse · DuckDB / MotherDuck"]
+    warehouse --> repository["Shared repository and reporting logic"]
+    repository --> dashboard["Streamlit · seven workspace pages"]
+    repository --> rest["FastAPI · metrics, exports, reports"]
+    question["Natural-language question"] --> assistant["Optional LLM / deterministic query routing"]
+    assistant --> guard["SQL AST validation · limits · timeout"]
+    guard --> repository
+    style warehouse fill:#292419,stroke:#C8A951,color:#F8E4A0
+    style guard fill:#182A25,stroke:#65A58C,color:#DAF3E7
 ```
 
----
+The dashboard calls the Python services directly. The API offers a separate interface to the same pipeline and warehouse logic. Airflow invokes the pipeline runner for scheduled work, while the included dbt project models the curated sales transformations.
+
+### Two ingestion paths
+
+| Path | Input | Published model |
+| --- | --- | --- |
+| **Curated batch** | Customer, product, order, order-item, and website-event source files. | Contract-validated staging data, dimensions, sales facts, and reporting aggregates. |
+| **Flexible sales export** | Sales files with business-specific column names. | Detected semantic mappings, canonical sales records, and a source-shaped table for inspection. |
+
+### Engineering decisions
+
+- **Traceable imports.** Source receipts include checksums, and completed imports can be restored as new versions. Cloud imports archive source bytes and processing artifacts in MotherDuck.
+- **Explicit reporting semantics.** Currency groups remain separate. Missing values retain their meaning, and status fields determine which sales contribute to recognized revenue. Review the metric definitions before integrating downstream reports. [Data dictionary](docs/data_dictionary.md)
+- **Workspace isolation.** Anonymous dashboard sessions use private storage. Authenticated workspaces derive their scope from the verified issuer and subject. Direct pipeline jobs operate on their configured warehouse. [Operations guide](docs/runbook.md)
+- **Controlled SQL execution.** The query guard parses SQL into an abstract syntax tree, restricts tables and functions, blocks mutations and external scans, and enforces result limits and execution timeouts. [AI safety design](docs/ai_safety.md)
+- **Optional AI dependency.** Provider configuration enables model-generated SQL. Deterministic routing supports a limited set of sales questions when a model is unavailable.
 
 ## Quickstart
 
-### 1. Setup Environment
+Requires **Python 3.10+**. Local dashboard exploration works with DuckDB and requires no cloud credentials.
 
 ```bash
-# Clone the repository
 git clone https://github.com/LalitSoni19/DataFlow-AI.git
 cd DataFlow-AI
-
-# Create and activate a virtual environment
 python -m venv .venv
-
-# Windows (PowerShell):
-.\.venv\Scripts\Activate.ps1
-# macOS / Linux:
-source .venv/bin/activate
-
-# Install dependencies in editable mode
-pip install -e .[dev]
 ```
 
-### 2. Run the Pipeline
+Activate the environment using the command for your shell.
 
-Generate sample data, run validation checks, quarantine bad records, and build the analytical warehouse:
+| Shell | Command |
+| --- | --- |
+| PowerShell | `.\.venv\Scripts\Activate.ps1` |
+| macOS / Linux | `source .venv/bin/activate` |
+
+```bash
+python -m pip install -e ".[dev]"
+python -m streamlit run streamlit_app/app.py
+```
+
+Open [localhost:8501](http://localhost:8501). Choose **Build Sample Warehouse**, or open **Import data**, upload a sales file, select **Preview import**, and then **Publish reviewed files**.
+
+### Run the pipeline and API
+
+For scripted ingestion and API exploration, populate the configured warehouse and start the API.
 
 ```bash
 python scripts/run_pipeline.py --regenerate-sample
-```
-
-The database is built at `data/warehouse/dataflow.duckdb`.
-
-> **Custom Data**: To import your own folder of sales files:
-> ```bash
-> python scripts/run_pipeline.py --source-dir "/path/to/your/sales/folder"
-> ```
-
-### 3. Start the Apps
-
-Open two terminals to launch both the backend and frontend:
-
-**Terminal 1 — FastAPI Server:**
-```bash
 python scripts/run_api.py
 ```
-*API docs (Swagger UI): [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)*
 
-**Terminal 2 — Streamlit Dashboard:**
+The default local warehouse is `data/warehouse/dataflow.duckdb`. Browse the interactive API documentation at [localhost:8000/docs](http://localhost:8000/docs).
+
+To process your own source directory, run the following command before starting the API.
+
 ```bash
-streamlit run streamlit_app/app.py
+python scripts/run_pipeline.py --source-dir "/path/to/sales-files"
 ```
-*Dashboard: [http://localhost:8501](http://localhost:8501)*
 
----
-
-## Core Capabilities
-
-### 1. Flexible Ingestion & Automatic Profiling
-- Ingests CSV, TSV, XLSX, JSON, and JSON Lines exports.
-- Smart column detection maps common business headers (`invoice date`, `unit price`, `qty`, `customer`, `region`, etc.) to canonical warehouse columns.
-- Non-sales files are safely rejected with helpful diagnostic messages.
-- Files are saved with SHA-256 checksums and per-run manifest logs.
-
-### 2. Data Quality & Quarantining
-- Pre-load schema validation, null checks, format validations, and referential integrity checks.
-- Rows failing validation are written to isolated JSON Lines quarantine files with error reasons—preventing pipeline crashes and preserving data integrity.
-
-### 3. Serverless Analytical Warehouse (DuckDB)
-- Runs completely in-process using DuckDB. No separate database server required.
-- Organized into clean layers: staging tables, dimensional tables (`dim_customers`, `dim_products`, `dim_date`, `fact_orders`), and aggregate reporting marts.
-- Supports **MotherDuck** cloud execution by simply setting `MOTHERDUCK_TOKEN` in your environment.
-
-### 4. Sandboxed AI Query Assistant
-- Ask questions in conversational English (e.g., *"What was our total revenue in Q3?"*).
-- **Safety First**:
-  - Live schema awareness: queries are generated only against approved warehouse tables.
-  - Read-only execution: blocks DDL/DML, external scans, Cartesian joins, and SQL comments.
-  - Hard query timeout and row limit caps (max 200 rows).
-  - Customer PII (names, emails) is automatically redacted in prompts and responses.
-  - Multi-model fallback chain: if the primary model is busy (e.g. HTTP 503), it automatically tries fallback models.
-  - 100% offline fallback: deterministic keyword-based rule engine works even without an internet connection.
-
----
+**The anonymous dashboard has its own session workspace.** Import files through the dashboard to explore them there. Configure authenticated workspaces when the dashboard and API should serve the same user's persistent data.
 
 ## Configuration
 
-Copy `.env.example` to `.env` to configure optional credentials:
+Use `.env` for local configuration and your deployment's secret store for hosted credentials. `.env.example` contains configuration examples.
 
-```bash
-cp .env.example .env
-```
+| Purpose | Settings | Behavior |
+| --- | --- | --- |
+| Local storage | `DATAFLOW_DATA_DIR`, `DATAFLOW_DATABASE_PATH` | Configure pipeline and API data paths. Anonymous dashboard storage is scoped separately. |
+| Cloud warehouse | `MOTHERDUCK_TOKEN`, `DATAFLOW_DATABASE_URL` | Set a writable database URI such as `md:dataflow_ai`. Workspace provisioning requires database creation and write permissions. |
+| Hosted AI | `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` | Configure an OpenAI-compatible provider endpoint and model. |
+| Local AI | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | Use a running Ollama service. |
+| Request budgets | `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES`, `AI_QUERY_TIMEOUT_SECONDS` | Defaults are 20 seconds, two retries, and eight seconds respectively. |
+| Managed identity | `DATAFLOW_AUTH_REQUIRED`, `DATAFLOW_OIDC_ISSUER`, `DATAFLOW_OIDC_AUDIENCE`, `DATAFLOW_OIDC_JWKS_URL` | Enable verified user workspaces. Streamlit additionally requires native OIDC auth secrets. |
 
-| Variable | Default | Description |
-|---|---|---|
-| `DATAFLOW_DATA_DIR` | `data` | Base directory for data lake & local storage |
-| `DATAFLOW_DATABASE_PATH` | `data/warehouse/dataflow.duckdb` | Path to local DuckDB file |
-| `MOTHERDUCK_TOKEN` | - | (Optional) MotherDuck token for cloud storage & compute |
-| `DATAFLOW_DATABASE_URL` | - | MotherDuck database URI (e.g. `md:dataflow_ai`) |
-| `LLM_BASE_URL` | - | OpenAI-compatible endpoint (e.g. Google Gemini endpoint) |
-| `LLM_API_KEY` | - | API key for external LLM provider |
-| `LLM_MODEL` | `gemini-3.5-flash-lite` | Primary LLM model |
-| `LLM_FALLBACK_MODELS` | `gemini-3.5-flash-lite,gemini-3.8-flash` | Comma-separated fallback models on transient errors |
-| `LLM_TIMEOUT_SECONDS` | `20` | Request timeout per LLM call |
-| `LLM_MAX_RETRIES` | `2` | Number of retry attempts on rate limit / 503 spikes |
-| `AI_QUERY_TIMEOUT_SECONDS`| `8` | Warehouse execution timeout for AI-generated queries |
+### Deployment considerations
 
----
+Hosted customer deployments require identity-provider configuration, server-side secrets, storage retention, and appropriate warehouse permissions. Anonymous cloud databases need an operator-managed retention policy. Local durable workspaces require persistent storage and functioning file locks. [Deployment and recovery instructions](docs/runbook.md)
 
-## API Endpoints
+Docker Compose includes API and dashboard services. Configure the required JWT secret, trusted origins, and identity settings before starting the stack.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Service health status |
-| `GET` | `/api/kpis/overview` | Core KPIs (revenue, orders, active customers, average line value) |
-| `GET` | `/api/sales` | Daily aggregated sales trends |
-| `GET` | `/api/products/top` | Top-performing products ranked by revenue |
-| `GET` | `/api/pipeline/status` | Last pipeline run execution summary and row counts |
-| `GET` | `/api/data-quality` | Quality check results and quarantine statistics |
-| `GET` | `/api/metadata/tables` | Schema definitions for analytics tables |
-| `GET` | `/api/exports/sales.csv` | Export summarized sales dataset to CSV |
-| `POST` | `/api/ask` | Natural language Text-to-SQL endpoint |
-| `POST` | `/api/privacy/customers/{id}/delete` | GDPR customer deletion & anonymization |
-
----
-
-## Optional Integrations
-
-### dbt Transformations
-Run dbt models against your DuckDB warehouse:
-```bash
-cp dbt/profiles.yml.example ~/.dbt/profiles.yml
-dbt build --project-dir dbt
-```
-
-### Apache Airflow DAG
-An Airflow TaskFlow DAG is included in `airflow/dags/sales_pipeline.py`. To run:
-1. Install orchestration dependencies: `pip install -e .[orchestration]`
-2. Set `DATAFLOW_PROJECT_ROOT` to this project directory.
-3. Link `airflow/dags/sales_pipeline.py` into your Airflow DAGs directory.
-
-### Docker Deployment
-Run the platform as a containerized stack:
 ```bash
 docker compose --env-file .env up --build
 ```
 
----
+## API surface
 
-## Repository Structure
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Service health |
+| `GET` | `/api/kpis/overview` | Revenue, order, and customer metrics |
+| `GET` | `/api/sales` | Sales aggregates |
+| `GET` | `/api/products/top` | Product rankings |
+| `GET` | `/api/pipeline/status` | Pipeline status and row counts |
+| `GET` | `/api/data-quality` | Quality results |
+| `GET` | `/api/metadata/tables` | Available analytical tables |
+| `GET` | `/api/exports/sales.csv` | Sales export |
+| `GET` | `/api/reports/monthly` | Monthly report |
+| `POST` | `/api/ask` | Natural-language analytics |
+| `POST` | `/api/privacy/customers/{customer_id}/delete` | Authorized customer anonymization |
 
-```text
-├── airflow/           # Airflow TaskFlow pipeline DAGs
-├── config/            # Schema definitions & contract rules
-├── data/              # Raw data lake, processed partitions, quarantine & DuckDB warehouse
-├── dbt/               # dbt transformation models and tests
-├── docs/              # System architecture, data dictionary, and runbooks
-├── scripts/           # Execution scripts for pipeline, API, and dashboard
-├── src/dataflow_ai/   # Main package
-│   ├── ai/            # Safe Text-to-SQL engine, prompts, and LLM clients
-│   ├── api/           # FastAPI routers, auth, rate-limiting, and schemas
-│   ├── ingestion/     # File loaders & flexible sales profiler
-│   ├── warehouse/     # DuckDB repository, schemas, and queries
-│   ├── pipeline.py    # Pipeline runner & quality validation
-│   ├── sample_data.py # Synthetic demo data generator
-│   ├── security.py    # PII masking & authentication
-│   └── settings.py    # App configuration & environment loader
-├── streamlit_app/     # Multi-page dashboard
-└── tests/             # Pytest test suite (130+ tests)
-```
+Request schemas, query parameters, and response models are available in the running API's Swagger documentation.
 
----
-
-## Testing
-
-Run the test suite with pytest:
+## Development and verification
 
 ```bash
-pytest
+python -m pytest
 ```
 
----
+The test suite covers ingestion, reporting semantics, SQL restrictions, privacy controls, cloud configuration, API behavior, and Streamlit visibility. The session-isolation regression publishes an import in one dashboard session and checks that a second session has an empty dashboard and import history. GitHub Actions runs the suite on Python 3.10 and 3.12 and smoke-tests the installed wheel.
 
-## License
+For a local browser walkthrough, the repository includes `scripts/verify_local_ui.py`. It requires Playwright and Microsoft Edge, starts temporary local services, and exercises all seven dashboard pages with synthetic data.
 
-This project is licensed under the Apache 2.0 License.
+| Location | Responsibility |
+| --- | --- |
+| `src/dataflow_ai/ingestion/` | File readers, API ingestion, raw storage, and sales profiling |
+| `src/dataflow_ai/processing/` | Cleaning and validation |
+| `src/dataflow_ai/warehouse/` | Schema, transactions, and analytical queries |
+| `src/dataflow_ai/ai/` | Query routing, provider clients, prompts, and SQL guard |
+| `src/dataflow_ai/api/` | HTTP routes, authentication, and rate limiting |
+| `src/dataflow_ai/pipeline.py` | Pipeline orchestration and import restoration |
+| `streamlit_app/` | Dashboard pages and shared UI components |
+| `tests/` | Automated regression suite |
+| `dbt/` · `airflow/` | Optional transformation and orchestration integrations |
+
+<details>
+<summary><strong>Optional dbt and Airflow setup</strong></summary>
+
+Install the extras for the integration you intend to run.
+
+```bash
+python -m pip install -e ".[dbt]"
+python -m pip install -e ".[orchestration]"
+```
+
+For dbt, adapt `dbt/profiles.yml.example` into your dbt profile directory, then run `dbt build --project-dir dbt`.
+
+For Airflow, set `DATAFLOW_PROJECT_ROOT` to the repository directory and make `airflow/dags/sales_pipeline.py` available in your Airflow DAG directory. Configure persisted source snapshots and prevent overlapping runs against the same warehouse.
+
+</details>
+
+## Technical documentation
+
+| Guide | What it covers |
+| --- | --- |
+| [Architecture](docs/architecture.md) | Processing paths and service boundaries |
+| [Data dictionary](docs/data_dictionary.md) | Analytical models and metric definitions |
+| [AI safety](docs/ai_safety.md) | Query restrictions and deployment boundaries |
+| [Operations runbook](docs/runbook.md) | Configuration, identity, restoration, and cloud operation |
